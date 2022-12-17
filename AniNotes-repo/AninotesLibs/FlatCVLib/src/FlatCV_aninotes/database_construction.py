@@ -11,6 +11,11 @@ from sentence_transformers import SentenceTransformer, util # SLOOOOOOOOOW
 from random import sample
 import sys
 
+STATS = {}
+
+def update_stats(phrase):
+    STATS[phrase] = 0 if phrase not in STATS else STATS[phrase] + 1
+
 #from multiprocessing import Pool
 #from itertools import repeat
 
@@ -313,6 +318,216 @@ def remove_holes(img):
 
 # -------------------------------
 
+'''                            |
+    CENTRAL IMAGE MANAGEMENT    |
+                               v   '''
+
+# Manages the lookup table of my main image that contains all necessary information about the image.
+'''class img_data:
+    def __init__(self, height, width):
+        self.height = height
+        self.width = width
+
+        # 2D array with pixel data at indices. The first element of the data is a 2-element list with the first
+        # value as a boolean value that is True if the image at that point is black (img is black and white), and
+        # the second value as a list of the information about that point. The second element of the main data is
+        # a list of the neighbors to that point. The neighbors are stored as the first items in their main data.
+        arr = [[[[False, []], []] for y in range(height) for x in range(width)]]
+        white_points = []
+        for y in range(height):
+            for x in range(width):
+                white_points.append((y, x))
+                px_data = arr[y, x]
+                px, nbrs = px_data
+                mark, info = px
+
+                # The neighbors are put into two separate lists: one for adjacent neighbors, and the other for
+                # diagonal neighbors.
+                adj_nbrs = []
+                dia_nbrs = []
+
+                # The adjcent neighbors are stored in the order of: "UP", "LEFT", "RIGHT", "DOWN". The diagonal
+                # neighbors are stored in the order of: "TOP LEFT", "TOP RIGHT", "BOTTOM LEFT", "BOTTOM RIGHT".
+                for iy in range(y - 1, y + 2):
+                    for ix in range(x - 1, x + 2):
+                        if not(iy == y and ix == x):
+                            if 0 <= iy < height and 0 <= ix < width:
+                                nbr = arr[iy, ix][0]
+                                if iy == y or ix == x:
+                                    adj_nbrs.append(nbr)
+                                else:
+                                    dia_nbrs.append(nbr)
+                nbrs.append(adj_nbrs)
+                nbrs.append(dia_nbrs)
+        self.img = np.array(arr)
+        self.white_points = white_points
+        self.black_points = []
+
+    # Marks or unmarks all the points in point_set (depends on the boolean value of change).
+    def change_points(point_set, change):
+        for y, x in point_set:
+            self.img[y, x][0][0] = change'''
+
+# HEIGHT = WIDTH = 0
+#IMG_DCT = {}
+#WHITE_POINTS = set()
+#BLACK_POINTS = set()
+#WHITE_POINTS_WHITE_NBRS = {}
+#WHITE_POINTS_BLACK_NBRS = {}
+#BLACK_POINTS_WHITE_NBRS = {}
+#BLACK_POINTS_BLACK_NBRS = {}
+IMG_INFO = []#[(DIMENSIONS, IMG_DCT, WHITE_POINTS, BLACK_POINTS, WHITE_POINTS_WHITE_NBRS, WHITE_POINTS_BLACK_NBRS, BLACK_POINTS_WHITE_NBRS, BLACK_POINTS_BLACK_NBRS)]
+
+def img_dct_idx(WIDTH, y, x):
+    #WIDTH = IMG_INFO[img_idx][0][1]
+    return x + WIDTH * y
+
+def img_arr_idx(WIDTH, i):
+    #WIDTH = IMG_INFO[img_idx][0][1]
+    return (i // WIDTH, i % WIDTH)
+
+def initialize_img(DIMENSIONS):
+    HEIGHT, WIDTH = DIMENSIONS
+    IMG_DCT = {i : [[i, False], []] for i in range(HEIGHT * WIDTH)}
+    WHITE_POINTS = set()
+    BLACK_POINTS = set()
+    WHITE_POINTS_WHITE_NBRS = {}
+    WHITE_POINTS_BLACK_NBRS = {}
+    BLACK_POINTS_WHITE_NBRS = {}
+    BLACK_POINTS_BLACK_NBRS = {}
+    for y in range(HEIGHT):
+        for x in range(WIDTH):
+            i_pt = img_dct_idx(WIDTH, y, x)
+            WHITE_POINTS.add(i_pt)
+            px_data = IMG_DCT[i_pt]
+            px, nbrs = px_data
+            for iy in range(y - 1, y + 2):                                          #   1 2 3
+                for ix in range(x - 1, x + 2):                                      #   4 * 5
+                    if not(iy == y and ix == x):                                    #   6 7 8
+                        if 0 <= iy < HEIGHT and 0 <= ix < WIDTH:
+                            nbr = IMG_DCT[img_dct_idx(WIDTH, iy, ix)][0]
+                            nbrs.append(nbr)
+    img_idx = len(IMG_INFO)
+    IMG_INFO.append((DIMENSIONS, IMG_DCT, WHITE_POINTS, BLACK_POINTS, WHITE_POINTS_WHITE_NBRS, WHITE_POINTS_BLACK_NBRS, BLACK_POINTS_WHITE_NBRS, BLACK_POINTS_BLACK_NBRS))
+    return img_idx
+
+def change_points(point_set, change, img_idx, point_type): # point_type: 0 = i_pt ; 1 = yx_pt
+    DIMENSIONS, IMG_DCT, WHITE_POINTS, BLACK_POINTS, WHITE_POINTS_WHITE_NBRS, WHITE_POINTS_BLACK_NBRS, BLACK_POINTS_WHITE_NBRS, BLACK_POINTS_BLACK_NBRS = IMG_INFO[img_idx]
+    HEIGHT, WIDTH = DIMENSIONS
+    for pt in point_set:
+        i_pt = pt if point_type == 0 else img_dct_idx(WIDTH, pt[0], pt[1])
+        pre_change = IMG_DCT[i_pt][0][1]
+        IMG_DCT[i_pt][0][1] = change
+        if pre_change != change:
+
+            # If I change to white...
+            if change == False:
+                if i_pt not in WHITE_POINTS:
+                    BLACK_POINTS.remove(i_pt)
+                    if i_pt in BLACK_POINTS_WHITE_NBRS:
+                        BLACK_POINTS_WHITE_NBRS.pop(i_pt)
+                    if i_pt in BLACK_POINTS_BLACK_NBRS:
+                        BLACK_POINTS_BLACK_NBRS.pop(i_pt)
+                    WHITE_POINTS.add(i_pt)
+                    white_nbrs = set()
+                    black_nbrs = set()
+                    for nbr in IMG_DCT[i_pt][1]:
+                        nbr_idx, mark = nbr
+                        if mark == False:
+                            white_nbrs.add(nbr_idx)
+                            if nbr_idx not in WHITE_POINTS_WHITE_NBRS:
+                                WHITE_POINTS_WHITE_NBRS[nbr_idx] = set()
+                            WHITE_POINTS_WHITE_NBRS[nbr_idx].add(i_pt)
+                        else:
+                            black_nbrs.add(nbr_idx)
+                            if nbr_idx not in BLACK_POINTS_WHITE_NBRS:
+                                BLACK_POINTS_WHITE_NBRS[nbr_idx] = set()
+                            BLACK_POINTS_WHITE_NBRS[nbr_idx].add(i_pt)
+                            BLACK_POINTS_BLACK_NBRS[nbr_idx].remove(i_pt)
+                    if white_nbrs:
+                        WHITE_POINTS_WHITE_NBRS[i_pt] = white_nbrs
+                    if black_nbrs:
+                        WHITE_POINTS_BLACK_NBRS[i_pt] = black_nbrs
+
+            # If I change to black...
+            else:
+                if i_pt not in BLACK_POINTS:
+                    WHITE_POINTS.remove(i_pt)
+                    if i_pt in WHITE_POINTS_BLACK_NBRS:
+                        WHITE_POINTS_BLACK_NBRS.pop(i_pt)
+                    BLACK_POINTS.add(i_pt)
+                    white_nbrs = set()
+                    black_nbrs = set()
+                    for nbr in IMG_DCT[i_pt][1]:
+                        nbr_idx, mark = nbr
+                        if mark == False:
+                            white_nbrs.add(nbr_idx)
+                            if nbr_idx not in WHITE_POINTS_BLACK_NBRS:
+                                WHITE_POINTS_BLACK_NBRS[nbr_idx] = set()
+                            WHITE_POINTS_BLACK_NBRS[nbr_idx].add(i_pt)
+                        else:
+                            black_nbrs.add(nbr_idx)
+                            if nbr_idx not in BLACK_POINTS_BLACK_NBRS:
+                                BLACK_POINTS_BLACK_NBRS[nbr_idx] = set()
+                            BLACK_POINTS_BLACK_NBRS[nbr_idx].add(i_pt)
+                            BLACK_POINTS_WHITE_NBRS[nbr_idx].remove(i_pt)
+                    if white_nbrs:
+                        BLACK_POINTS_WHITE_NBRS[i_pt] = white_nbrs
+                    if black_nbrs:
+                        BLACK_POINTS_BLACK_NBRS[i_pt] = black_nbrs
+
+def get_neighbor_segments(img_idx, i_pt):
+    nbrs = IMG_INFO[img_idx][1][i_pt][1]
+    nbr_order = (0, 1, 2, 4, 7, 6, 5, 3)
+    nbr_order_inds = {0 : 0, 1 : 1, 2 : 2, 4 : 3, 7 : 4, 6 : 5, 5 : 6, 3 : 7}
+    nbr_marks = [nbrs[i][1] for i in nbr_order]
+    segments = [[nbrs[nbr_order_inds[i]][0] for i in segment_str.split(".")[: -1]] for segment_str in list(filter(None, "".join([" ", f"{i}."][nbr_marks[i]] for i in range(8)).split(" ")))]
+    if nbr_marks[0] == nbr_marks[7] == True:
+        segments[0] += segments.pop(7)
+    return segments
+
+def restart_img(white_points, black_points, img_idx):
+    change_points(white_points, False, img_idx, 1)
+    change_points(black_points, True, img_idx, 1)
+
+def reconstruct_img(img_idx):
+    res_img_info = IMG_INFO[img_idx]
+    HEIGHT, WIDTH = res_img_info[0]
+    WHITE_POINTS = res_img_info[2]
+    res_img = np.zeros((HEIGHT, WIDTH, 3), np.uint8)
+    for i_pt in WHITE_POINTS:
+        y, x = img_arr_idx(WIDTH, i_pt)
+        res_img[y, x] = (255, 255, 255)
+    return res_img
+
+def to_cv_img(img_idx):
+    HEIGHT, WIDTH = IMG_INFO[img_idx][0]
+    WHITE_POINTS = IMG_INFO[img_idx][2]
+    cv_img = np.zeros((HEIGHT, WIDTH, 3), np.uint8)
+    for i_pt in WHITE_POINTS:
+        y, x = img_arr_idx(WIDTH, i_pt)
+        cv_img[y, x] = (255, 255, 255)
+    return cv_img
+
+'''if __name__ == "__main__":
+    HEIGHT = 300
+    WIDTH = 260
+    DIMENSIONS = (HEIGHT, WIDTH)
+    initialize_img(DIMENSIONS)
+    change_points({(0, 0), (1, 0)}, True)
+    print(len(WHITE_POINTS_BLACK_NBRS))
+    print(len(BLACK_POINTS_WHITE_NBRS))
+    print(len(BLACK_POINTS_BLACK_NBRS))
+    print(WHITE_POINTS_BLACK_NBRS)
+    print(BLACK_POINTS_WHITE_NBRS)
+    print(BLACK_POINTS_BLACK_NBRS)'''
+
+'''                            ^
+    CENTRAL IMAGE MANAGEMENT    |
+                               |   '''
+
+# -------------------------------
+
 '''                      |
     IMAGE PROCUREMENT    |
                          v   '''
@@ -460,9 +675,6 @@ def get_img_urls(text, sem_check):
     # Return the path of the image link file.
     return file
 
-def capitalize_first_letters(text):
-    return " ".join(word[0].upper() + word[1:] for word in text.split(" "))
-
 # Takes in the image link file and downloads all of the images linked to within it to a folder.
 def download_images(file):
 
@@ -515,7 +727,7 @@ def download_images(file):
 
 # Checks if the text is the name of a symbol that Manim can display through LaTex.
 def is_symbol(text):
-    symbol_dict = {"plus" : "+"} # WILL FILL LATER
+    symbol_dict = {"mu": "µ", "pi": "π"} # WILL FILL LATER
     return symbol_dict[text] if text in symbol_dict else False
 
 # Creates a tuple with the text representing the object and the object's type.
@@ -547,6 +759,19 @@ def create_object(text):
 #                                                     .  .  .
 # Neighborhood of range 1 around a point (*) --->     .  *  .
 #                                                     .  .  .
+
+def get_sets_of_colored_points_binary(img_idx, value):
+    i_point_sets = []
+    POINTS = IMG_INFO[img_idx][2] if value == False else IMG_INFO[img_idx][3]
+    for i_pt in POINTS:
+        in_new_object = True
+        for i_point_set in i_point_sets:
+            if i_pt in i_point_set:
+                in_new_object = False
+                break
+        if in_new_object:
+            i_point_sets.append(get_set_of_points_from_point_binary(img_idx, i_pt, value))
+    return i_point_sets
 
 # Returns a list of all continuous groups of points in img with the same characteristic as denoted by color.
 #
@@ -680,103 +905,29 @@ def get_edge_points(img, obj_points, removed_points, boundary_layers):
 # PRECONDITION: img is black and white.
 #
 # Fills in all small holes (black or white) with sizes less than max_size or a smart size if max_size is equal to -1.
-def remove_small_objects(img, max_size):
-    dimensions = img.shape
-    height = dimensions[0]
-    width = dimensions[1]
-
-    # List of white point groups in img.
-    white_object_point_lists = []
-    for y in range(0, height):
-        for x in range(0, width):
-            if img[y][x] >= 250:
-                point = (y, x)
-                in_new_object = True
-                for list in white_object_point_lists:
-                    if point in list:
-                        in_new_object = False
-                        break
-                if in_new_object:
-                    set_of_points = get_set_of_points_from_point(img, point, 1)
-                    white_object_point_lists.append(set_of_points)
+def remove_small_objects(img_idx, max_size = -1):
 
     # List of black point groups in img.
-    black_object_point_lists = []
-    black_point_count = 0
-    for y in range(0, height):
-        for x in range(0, width):
-            if img[y][x] <= 5:
-                black_point_count += 1
-                point = (y, x)
-                in_new_object = True
-                for list in black_object_point_lists:
-                    if point in list:
-                        in_new_object = False
-                        break
-                if in_new_object:
-                    set_of_points = get_set_of_points_from_point(img, point, 0)
-                    black_object_point_lists.append(set_of_points)
+    black_point_sets = get_sets_of_colored_points_binary(img_idx, True)
+    black_point_count = sum(len(point_list) for point_list in black_object_point_lists)
 
     # If max_size is -1, make it a "smart" size equal to roughly log base 2 of the number of black points in img. The
     # idea behind this choice is that the black points are the main points I care about for this function.
     if max_size == -1:
         max_size = black_point_count.bit_length() - 1
 
-    # Fill in all the small white groups.
-    for list in white_object_point_lists:
-        if len(list) < max_size:
-            for point in list:
-                y, x = point
-                img[y][x] = 0
-
     # Fill in all the small black groups.
-    for list in black_object_point_lists:
-        if len(list) < max_size:
-            for point in list:
-                y, x = point
-                img[y][x] = 255
-    return img
+    for point_set in black_point_sets:
+        if len(point_set) < max_size:
+            change_points(point_set, False, img_idx, 0)
 
 # PRECONDITION: img has no transparent points.
 #
 # Returns a black and white image containing the objects in img.
-def get_thresholded_img(img, current_points, edge_points, thresh):
-    '''edge_colors = []
-    height, width = img.shape[0:2]
-    for y, x in current_points:
-        if y == 0 or y == height - 1 or x == 0 or x == width - 1:
-            edge_colors.append(img[y, x])
-        else:
-            is_edge_pixel = False
-            for iter_y in range(y - 1, y + 2):
-                for iter_x in range(x - 1, x + 2):
-                    if (y, x) not in current_points:
-                        is_edge_pixel = True
-            if is_edge_pixel:
-                edge_colors.append(img[y, x])
-    color_mode = 1
-    edge_color_set = set(edge_colors)
-    for color in edge_color_set:
-        if edge_colors.count(color) > color_mode:
-            color_mode = edge_colors.count(color)
-    background_color = (255, 255, 255)
-    for color in edge_color_set:
-        if edge_colors.count(color) == color_mode:
-            background_color = color
-            break
-    current_thresh = background_threshold(img, background_color, current_points)
-    for y, x in current_points:
-        if current_thresh[y, x][0] == current_thresh[y, x][1] == current_thresh[y, x][2] == 0:
-            thresh[y, x] = (0, 0, 0)
-    next_objects = get_sets_of_colored_points(current_thresh, 0)
-    for object in next_objects:
-        thresh = get_thresholded_img(img, object, thresh)
-    return thresh'''
+def get_thresholded_img(img, img_idx, current_points, edge_points):
 
     # Don't continue if the current points are small in number (extraneous).
-    if len(current_points) <= 5:
-        return thresh
-    else:
+    if len(current_points) > 5:
         height, width = img.shape[0:2]
 
         edge_colors = []
@@ -794,190 +945,194 @@ def get_thresholded_img(img, current_points, edge_points, thresh):
             if edge_colors.count(color) == color_mode:
                 background_color = color
                 break
-
-        # The keys are colors and the values are the number of points in edge_points with that color.
-        '''edge_colors_dict = {}
-        for y, x in edge_points:
-            edge_colors_dict[(color := img[y, x])] if color not in edge_colors_dict else edge_colors_dict[color] + 1'''
-
         edge_point = edge_points[0]
 
         # current_thresh is an image with points in current_points colored black if they have significantly
         # different colors in img than the background color.
         current_thresh = background_threshold(img, background_color, current_points, edge_point)
-
-        print(f"BLACK POINTS: {sum([1 for y in range(height) for x in range(width) if current_thresh[y, x][0] == 0])}")
-
         current_thresh = cv2.cvtColor(current_thresh, cv2.COLOR_BGR2GRAY)
 
         # Do a smart removal of small objects from current_thresh.
-        current_thresh = remove_small_objects(current_thresh, -1)
+        black_point_sets = get_sets_of_colored_points(current_thresh, 0)
+        black_point_count = sum(len(point_list) for point_list in black_point_sets)
+        white_point_sets = get_sets_of_colored_points(current_thresh, 1)
+        max_size = black_point_count.bit_length() - 1
+        for point_set in black_point_sets:
+            if len(point_set) < max_size:
+                for y, x in point_set:
+                    current_thresh[y, x] = 255
+                black_point_sets.remove(point_set)
+        for point_set in white_point_sets:
+            if len(point_set) < max_size:
+                for y, x in point_set:
+                    current_thresh[y, x] = 0
+                white_point_sets.remove(point_set)
 
         # All of the black groups of points in current_thresh.
-        current_objects = get_sets_of_colored_points(current_thresh, 0)
-        for object in current_objects:
+        for point_set in black_point_sets:
             current_object = np.zeros((height, width, 3), np.uint8)
             current_object = ~current_object
             current_object = cv2.cvtColor(current_object, cv2.COLOR_BGR2GRAY)
 
             # Draw object to current_object.
-            for y, x in object:
+            for y, x in point_set:
                 current_object[y, x] = 0
             hollow, drawn_points = is_hollow(current_object)
+            draw_points = set()
 
             # If object is hollow, draw it exactly to thresh.
-
-            DP = set()
-
             if hollow:
-                for y, x in object:
-                    DP.add((y, x))
-                    thresh[y, x] = (0, 0, 0)
+                for point in point_set:
+                    draw_points.add(point)
 
             # Otherwise, draw its edge to thresh.
             else:
-                for y, x in drawn_points:
-                    DP.add((y, x))
-                    thresh[y, x] = (0, 0, 0)
-
-            print(f"GET THRESH (NON CIM): {len(DP)}")
+                for point in drawn_points:
+                    draw_points.add(point)
+            print(f"GET THRESH: {len(draw_points)}")
+            change_points(draw_points, True, img_idx, 1)
 
             # removed_points are the first five outer layers of object, and current_edge_points is the sixth.
-            current_edge_points, removed_points = get_edge_points(current_object, object, [], 6)
+            current_edge_points, removed_points = get_edge_points(current_object, point_set, [], 6)
 
             # Remove the first five layers from object.
             for point in removed_points:
-                object.remove(point)
+                point_set.remove(point)
 
             # Draw onto thresh the threshold of all objects present within img. What this does is it gets objects
             # inside of other objects that have distinctly different colors. For an example, look at "set" on
             # wikipedia.
-            thresh = get_thresholded_img(img, object, current_edge_points, thresh)
-        return thresh
+            get_thresholded_img(img, img_idx, point_set, current_edge_points)
+
+def white_to_black_transitions(yx_pt, black_nbrs, WIDTH):
+    y, x = yx_pt
+    nbr_positions = ((y - 1, x), (y - 1, x + 1), (y, x + 1), (y + 1, x + 1), (y + 1, x), (y + 1, x - 1), (y, x - 1), (y - 1, x - 1))
+    transitions = sum(1 for i, (i_y, i_x) in enumerate(nbr_positions) if img_dct_idx(WIDTH, i_y, i_x) in black_nbrs and img_dct_idx(WIDTH, nbr_positions[i - 1][0], nbr_positions[i - 1][1]) not in black_nbrs)
+
+    return transitions
 
 # PRECONDITION: img is black and white.
 #
-# Thins img to specific requirements.
-def thin_img(img):
-    dimensions = img.shape
-    height = dimensions[0]
-    width = dimensions[1]
+# Zhang-Suen Skeletonization.
+def thin_img(img_idx):
+    '''info = IMG_INFO[img_idx]
+    HEIGHT, WIDTH = info[0]
+    WHITE_POINTS = info[2]
+    BLACK_POINTS = info[3]
+    BLACK_POINTS_BLACK_NBRS = info[7]
+    done = False
+    print("start while")
+    c = 0
+    while not done:
+        c += 1
+        print(c)
+        done = True
+        erase_points = set()
+        for i_pt in BLACK_POINTS:
+            yx_pt = img_arr_idx(WIDTH, i_pt)
+            y, x = yx_pt
+            P2 = img_dct_idx(WIDTH, y - 1, x)
+            P4 = img_dct_idx(WIDTH, y, x + 1)
+            P6 = img_dct_idx(WIDTH, y + 1, x)
+            P8 = img_dct_idx(WIDTH, y, x - 1)
+            black_nbrs = BLACK_POINTS_BLACK_NBRS[i_pt]
+            cond_0 = 0 < y < HEIGHT - 1 and 0 < x < WIDTH - 1
+            cond_1 = 2 <= len(black_nbrs) <= 6
+            cond_2 = white_to_black_transitions(yx_pt, black_nbrs, WIDTH) == 1
+            cond_3 = P2 in WHITE_POINTS or P4 in WHITE_POINTS or P6 in WHITE_POINTS
+            cond_4 = P4 in WHITE_POINTS or P6 in WHITE_POINTS or P8 in WHITE_POINTS
+            if cond_0 and cond_1 and cond_2 and cond_3 and cond_4:
+                erase_points = erase_points | {i_pt, P2, P4, P6, P8}
+        if erase_points:
+            change_points(erase_points, False, img_idx, 0)
+            print(f"change length 1: {len(erase_points)}")
+            done = False
+        erase_points = set()
+        for i_pt in BLACK_POINTS:
+            yx_pt = img_arr_idx(WIDTH, i_pt)
+            y, x = yx_pt
+            P2 = img_dct_idx(WIDTH, y - 1, x)
+            P4 = img_dct_idx(WIDTH, y, x + 1)
+            P6 = img_dct_idx(WIDTH, y + 1, x)
+            P8 = img_dct_idx(WIDTH, y, x - 1)
+            black_nbrs = BLACK_POINTS_BLACK_NBRS[i_pt]
+            cond_0 = 0 < y < HEIGHT - 1 and 0 < x < WIDTH - 1
+            cond_1 = 2 <= len(black_nbrs) <= 6
+            cond_2 = white_to_black_transitions(yx_pt, black_nbrs, WIDTH) == 1
+            cond_3 = P2 in WHITE_POINTS or P4 in WHITE_POINTS or P8 in WHITE_POINTS
+            cond_4 = P2 in WHITE_POINTS or P6 in WHITE_POINTS or P8 in WHITE_POINTS
+            if cond_0 and cond_1 and cond_2 and cond_3 and cond_4:
+                erase_points = erase_points | {i_pt, P2, P4, P6, P8}
+        if erase_points:
+            change_points(erase_points, False, img_idx, 0)
+            print(f"change length 2: {len(erase_points)}")
+            done = False'''
 
-    # The coordinates of a point's range 1 neighbors relative to it.
-    neighbor_coords = ((1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1), (0, 1))
-    for y in range(0, height):
-        for x in range(0, width):
-            if img[y][x] <= 5:
+    cv_img = to_cv_img(img_idx)
+    cv_img = ~cv_img
+    cv_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+    thin_img = cv2.ximgproc.thinning(cv_img)
+    thin_img = ~thin_img
+    cv2.imwrite("stupid_thin.jpg", thin_img)
+    white_points = set()
+    black_points = set()
+    HEIGHT, WIDTH = IMG_INFO[img_idx][0]
+    for y in range(HEIGHT):
+        for x in range(WIDTH):
+            val = thin_img[y, x]
+            if val == 255:
+                white_points.add((y, x))
+            elif val == 0:
+                black_points.add((y, x))
+    restart_img(white_points, black_points, img_idx)
 
-                # List of booleans for each neighbor in the range 1 neighborhood around the current point
-                # where True means that the neghbor is in img and is black, and False means otherwise.
-                marked_neighbors = []
-                for coord in neighbor_coords:
-                    new_y = y + coord[0]
-                    new_x = x + coord[1]
-                    if new_y >= 0 and new_y < height and new_x >= 0 and new_x < width:
-                        marked_neighbors.append(img[new_y][new_x] <= 5)
-                    else:
-                        marked_neighbors.append(False)
-
-                # List of consecutive segments of points in the range 1                           o . .
-                # neighborhood around the current point. For example,         ----->              o * o
-                # the point to the right has two neighbor segments                                . o o
-                # (a 'o' means a black point).
-                neighbor_segments = [[]]
-                first_index_marked = False
-                for index in range(0, 8):
-                    front_segment = -1
-                    front_segment = neighbor_segments[len(neighbor_segments) - 1]
-                    if marked_neighbors[index] == False:
-                        if front_segment != []:
-                            neighbor_segments.append([])
-                    else:
-                        coord = neighbor_coords[index]
-                        new_y = y + coord[0]
-                        new_x = x + coord[1]
-                        front_segment.append((new_y, new_x))
-                        if index == 0:
-                            first_index_marked = True
-                        if index == 7 and first_index_marked and len(neighbor_segments) > 1:
-                            first_segment = neighbor_segments.pop(0)
-                            for point in first_segment:
-                                front_segment.append(point)
-                if [] in neighbor_segments:
-                    neighbor_segments.remove([])
-
-                # If there are no neigbor segments around the current point, then make the current point white. If
-                # there is only one segment, and if it contains more than one point, them make the current point
-                # white.
-                if len(neighbor_segments) <= 1:
-                    if len(neighbor_segments) == 0:
-                        img[y][x] = 255
-                    else:
-                        if len(neighbor_segments[0]) > 1:
-                            img[y][x] = 255
-    return img
 
 # PRECONDITION: img is black and white.
 #
 # Thickens img by an amount designatied by thick_factor.
-def thicken_img(img, thick_factor):
-    dimensions = img.shape
-    height = dimensions[0]
-    width = dimensions[1]
-
-    # The result image.
-    thick = np.zeros((height, width, 3), np.uint8)
-    thick = ~thick
-
-    # Go thorugh all the points and only care about the black points.
-    for y in range(0, height):
-        for x in range(0, width):
-            if img[y][x] <= 5:
-
-                # Mark the result image black at the current point.
-                thick[y][x] = 0
-
-                # For each value i in the range of [1, range_factor], in the result image, mark each point adjacent
-                # to the current point i pixels away.
-                for i in range(1, thick_factor + 1):
-                    if y - i >= 0 and y - i < height and x >= 0 and x < width:
-                        thick[y - i][x] = 0
-                    if y >= 0 and y < height and x - i >= 0 and x - i < width:
-                        thick[y][x - i] = 0
-                    if y + i >= 0 and y + i < height and x >= 0 and x < width:
-                        thick[y + i][x] = 0
-                    if y >= 0 and y < height and x + i >= 0 and x + i < width:
-                        thick[y][x + i] = 0
-    return thick
+def thicken_img(img_idx, thick_factor):
+    info = IMG_INFO[img_idx]
+    HEIGHT, WIDTH = info[0]
+    BLACK_POINTS = info[3]
+    draw_points = set()
+    for i_pt in BLACK_POINTS:
+        y, x = img_arr_idx(WIDTH, i_pt)
+        for i in range(1, thick_factor + 1):
+            if y - i >= 0 and y - i < HEIGHT and x >= 0 and x < WIDTH:
+                draw_points.add((y - i, x))
+            if y >= 0 and y < HEIGHT and x - i >= 0 and x - i < WIDTH:
+                draw_points.add((y, x - i))
+            if y + i >= 0 and y + i < HEIGHT and x >= 0 and x < WIDTH:
+                draw_points.add((y + i, x))
+            if y >= 0 and y < HEIGHT and x + i >= 0 and x + i < WIDTH:
+                draw_points.add((y, x + 1))
+    change_points(draw_points, True, img_idx, 1)
 
 # One-stop-shop for image preparation according to everything required for the analysis to work.
-def prep_for_img_analysis(img):
-    cv2.imwrite("pre-prep.jpg", img)
-    dimensions = img.shape
-    height = dimensions[0]
-    width = dimensions[1]
-    thresh = np.zeros((height, width, 3),np.uint8)
+def prep_for_img_analysis(img, img_idx):
+    cv2.imwrite("CIM_pre-prep.jpg", img)
+    HEIGHT, WIDTH = IMG_INFO[img_idx][0]
+    thresh = np.zeros((HEIGHT, WIDTH, 3), np.uint8)
     thresh = ~thresh
     points = []
 
     # The initial edge points (on the borders of img.)
     edge_points = []
-    for y in range(height):
-        for x in range(width):
+    for y in range(HEIGHT):
+        for x in range(WIDTH):
             points.append((y, x))
-            if y == 0 or y == height - 1 or x == 0 or x == width - 1:
+            if y == 0 or y == HEIGHT - 1 or x == 0 or x == WIDTH - 1:
                 edge_points.append((y, x))
-    thresh = get_thresholded_img(img, points, edge_points, thresh)
-    frame_img = cv2.cvtColor(thresh, cv2.COLOR_BGR2GRAY)
-    cv2.imwrite("init_prep_pre-thick.jpg", frame_img)
-    frame_img = thicken_img(frame_img, 1)
-    cv2.imwrite("init_prep_pre-thin.jpg", frame_img)
-    frame_img = cv2.cvtColor(frame_img, cv2.COLOR_BGR2GRAY)
-    frame_img = ~frame_img
-    thin = cv2.ximgproc.thinning(frame_img)
-    thin = ~thin
-    final = thin_img(thin)
-    return final
+    get_thresholded_img(img, img_idx, points, edge_points)
+
+    print(done)
+    cv2.imwrite("CIM_init_prep_pre-thick.jpg", to_cv_img(img_idx))
+
+    thicken_img(img_idx, 1)
+
+    cv2.imwrite("CIM_init_prep_pre-thin.jpg", to_cv_img(img_idx))
+
+    thin_img(img_idx)
 
 def number_of_objects(img):
     dimensions = img.shape
@@ -1011,17 +1166,6 @@ def resize_img(img_path, img_name, output_path, max_dim):
     resized_img = img.resize((math.floor(width/factor), math.floor(height/factor)), Image.ANTIALIAS)
     resized_img.save(output_path + "R" + str(max_dim) + "-" + img_name, optimize = True, quality = 95)
     cv_img = cv2.imread(output_path + "R" + str(max_dim) + "-" + img_name)
-    '''cv_height, cv_width = cv_img.shape[0:2]
-    for y in range(0, cv_height):
-        for x in range(0, cv_width):
-            is_white = True
-            for val in cv_img[y, x]:
-                if val < 230:
-                    is_white = False
-                    break
-            if is_white:
-                cv_img[y, x] = (255, 255, 255)
-    cv2.imwrite(output_path + "R" + str(max_dim) + "-" + img_name, cv_img)'''
     return cv_img
 
 def get_transparent_boundary_points(cv_img, pil_img):
@@ -1104,77 +1248,6 @@ def remove_transparent_border(cv_img, pil_img):
 
 
 def opaque_img(img_path, img_name, output_path):
-    '''img = Image.open(img_path + img_name)
-    img = img.convert("RGBA")
-    datas = img.getdata()
-    new_data = []
-    for item in datas:
-        is_white = True
-        for val in item[0:3]:
-            if val < 240:
-                is_white = False
-        if item[3] == 0:
-            new_data.append((255, 255, 255, 255))
-        elif is_white:
-            new_data.append((0, 0, 0, 255))
-        else:
-            new_data.append(item)
-    img.putdata(new_data)
-    img.save(output_path + "opaque_" + img_name)
-    opaque_img = cv2.imread(output_path + "opaque_" + img_name)
-    return opaque_img'''
-
-    '''cv_img = cv2.imread(img_path + img_name)
-    pil_img = Image.open(img_path + img_name)
-    pil_img = pil_img.convert("RGBA")
-    height, width = cv_img.shape[0:2]
-    transparent_point_sets = get_sets_of_colored_points(cv_img, 4, pil_image = pil_img)
-    transparent_points = []
-    background_transparent_points = []
-    for point_set in transparent_point_sets:
-        transparent_points += point_set
-        is_background_set = False
-        for point in point_set:
-            y, x = point
-            if y == 0 or y == height - 1 or x == 0 or x == width - 1:
-                is_background_set = True
-                break
-        if is_background_set:
-            background_transparent_points += point_set
-    if len(background_transparent_points) == len(transparent_points):
-        for y in range(0, height):
-            for x in range(0, width):
-                if y >= 0 and y < height and x >= 0 and x < width:
-                    pixel = pil_img.getpixel((x, y))
-                    if pixel[3] != 0:
-                        is_transparent_border = False
-                        range_length = 4
-                        for iter_y in range(y - range_length, y + range_length + 1):
-                            for iter_x in range(x - range_length, x + range_length + 1):
-                                if not(iter_y == y and iter_y == x) and iter_y >= 0 and iter_y < height and iter_x >= 0 and iter_x < width:
-                                    if pil_img.getpixel((iter_x, iter_y))[3] == 0:
-                                        is_transparent_border = True
-                            if is_transparent_border:
-                                break
-                        if is_transparent_border:
-                            cv_img[y, x] = (255, 255, 255)
-    for point in transparent_points:
-        y, x = point
-        cv_img[y, x] = (255, 255, 255)
-    white_point_sets = get_sets_of_colored_points(cv_img, 3)
-    for point_set in white_point_sets:
-        is_border_set = False
-        for point in point_set:
-            y, x = point
-            if y == 0 or y == height - 1 or x == 0 or x == width - 1:
-                is_border_set = True
-        if not is_border_set:
-            for point in point_set:
-                y, x = point
-                cv_img[y, x] = (0, 0, 0)
-    cv2.imwrite(output_path + "opaque_" + img_name, cv_img)
-    return cv_img'''
-
     cv_img = cv2.imread(img_path + img_name)
     pil_img = Image.open(img_path + img_name)
     pil_img = pil_img.convert("RGBA")
@@ -1223,24 +1296,67 @@ def opaque_img(img_path, img_name, output_path):
                          v   '''
 
 def calculate_slope(line, approximate):
-    '''m = 0
-    if line[2] - line[0] == 0:
-        if approximate == True:
-            m = 10000
-        else:
-            m = "UND"
-    else:
-        m = (line[3] - line[1])/(line[2] - line[0])
-    return m'''
     return ["UND", 10000][approximate] if line[2] - line[0] == 0 else (line[3] - line[1])/(line[2] - line[0])
 
 def floor_point(point):
     return (math.floor(point[0]), math.floor(point[1]))
 
-def is_near_subset(A, B, closeness_bound): # A is near subset of B
-    if len(A) > len(B):
-        return False
+def is_near_subset(A, B, closeness_bound, nbrs = -1): # A is near subset of B
+    if nbrs != -1:
+        '''# A is set of points.
+        # B is grid (2D list) of marks if a point is there or not.
+        A_set = A[0]
+        B_set, B_grid = B[:2]
+        if len(A_set) > len(B_set):
+            return False
+        B_width = len(B_grid[0])
+        B_length = len(B_grid)
+        for A_y, A_x in A_set:
+            if B_grid[A_y][A_x]:
+                continue
+            for i in range(1, closeness_bound + 1):
+                near = False
+                min_x = A_x - i
+                max_x = A_x + i
+                min_y = A_y - i
+                max_y = A_y + i
+                for x in range(min_x, max_x + 1):
+                    if 0 <= x < B_width:
+                        if 0 <= min_y < B_length:
+                            if B_grid[min_y][x]:
+                                near = True
+                                break
+                        if 0 <= max_y < B_length:
+                            if B_grid[max_y][x]:
+                                near = True
+                                break
+                else:
+                    for y in range(min_y + 1, max_y):
+                        if 0 <= y < B_length:
+                            if 0 <= min_x < B_width:
+                                if B_grid[y][min_x]:
+                                    near = True
+                                    break
+                            if 0 <= max_x < B_width:
+                                if B_grid[y][max_x]:
+                                    near = True
+                                    break
+                    else:
+                        if i == closeness_bound:
+                            return False
+                if near:
+                    break
+        return True'''
+
+        if len(A) > len(B):
+            return False
+        for point in A:
+            if True not in nbrs[point]:
+                return False
+        return True
     else:
+        if len(A) > len(B):
+            return False
         is_near_subset = True
         for A_point in A:
             is_near_in_B = False
@@ -1256,14 +1372,11 @@ def is_near_subset(A, B, closeness_bound): # A is near subset of B
         return is_near_subset
 
 def calculate_y_val_on_circle(circle, x, sign):
-    '''a, b, r = circle
-    if (r ** 2) - ((x - a) ** 2) < 0:
-        return "none"'''
     a, b, r = circle
     return "none" if (r ** 2) - ((x - a) ** 2) < 0 else sign * math.sqrt((r ** 2) - ((x - a) ** 2)) + b
 
 def remove_near_subset_elements(lst, closeness_bound):
-    new_list = []
+    '''new_list = []
     for item in lst:
         if item not in new_list:
             new_list.append(item)
@@ -1281,39 +1394,49 @@ def remove_near_subset_elements(lst, closeness_bound):
             final_list.append(element)
         else: # MAYBE REMOVE? IDK... IF ISSUES --> CONSIDER
             list_copy.remove(element)
-    return final_list
-    '''lst = [item for i, item in enumerate(lst) if item not in lst[:i]]
-    lst_copy = list[:]'''
+    return final_list'''
 
+    init_list = []
+    for elem in lst:
+        if elem not in init_list:
+            init_list.append(elem)
+    seen_idcs = set()
+    result_list = []
+    for i, elem in enumerate(init_list):
+        other_point_sets = [other_elem[1][0] for other_i, other_elem in enumerate(init_list) if other_i not in seen_idcs and other_elem != elem]
+        other_points = set().union(*other_point_sets)
+        if not is_near_subset(elem[1][0], other_points, closeness_bound, grid = False):
+            result_list.append(elem)
+        else:
+            seen_idcs.add(i)
+    return result_list
 
-def hc_accum_array(img, radius_values):
-    h = img.shape[0]
-    w = img.shape[1]
-    accum_array = np.zeros((len(radius_values), h, w))
-    for i in range(h):
-        for j in range(w):
-            if img[i][j] != 0:
-                for r in range(len(radius_values)):
-                    rr = radius_values[r]
-                    hdown = max(0, i - rr)
-                    for a in range(hdown, i):
-                        b = round(j+math.sqrt(rr*rr - (a - i) * (a - i)))
-                        if b>=0 and b<=w-1:
-                            accum_array[r][a][b] += 1
-                            if 2 * i - a >= 0 and 2 * i - a <= h - 1:
-                                accum_array[r][2 * i - a][b] += 1
-                        if 2 * j - b >= 0 and 2 * j - b <= w - 1:
-                            accum_array[r][a][2 * j - b] += 1
-                        if 2 * i - a >= 0 and 2 * i - a <= h - 1 and 2 * j - b >= 0 and 2 * j - b <= w - 1:
-                            accum_array[r][2 * i - a][2 * j - b] += 1
+def hc_accum_array(img_idx, radius_values):
+    HEIGHT, WIDTH = IMG_INFO[img_idx][0]
+    BLACK_POINTS = IMG_INFO[img_idx][3]
+    accum_array = np.zeros((len(radius_values), HEIGHT, WIDTH))
+    for i_pt in BLACK_POINTS:
+        y, x = img_arr_idx(WIDTH, i_pt)
+        for r in range(len(radius_values)):
+            rr = radius_values[r]
+            hdown = max(0, y - rr)
+            for a in range(hdown, y):
+                b = round(x + math.sqrt(rr * rr - (a - y) * (a - y)))
+                if b >= 0 and b <= WIDTH - 1:
+                    accum_array[r][a][b] += 1
+                    if 2 * y - a >= 0 and 2 * y - a <= HEIGHT - 1:
+                        accum_array[r][2 * y - a][b] += 1
+                if 2 * x - b >= 0 and 2 * x - b <= WIDTH - 1:
+                    accum_array[r][a][2 * x - b] += 1
+                if 2 * y - a >= 0 and 2 * y - a <= HEIGHT - 1 and 2 * x - b >= 0 and 2 * x - b <= WIDTH - 1:
+                    accum_array[r][2 * y - a][2 * x - b] += 1
     return accum_array
 
-def find_circles(img, accum_array, radius_values, hough_thresh):
+def find_circles(accum_array, radius_values, hough_thresh):
     returnlist = []
     hlist = []
     wlist = []
     rlist = []
-    returnimg = img.copy()
     for r in range(accum_array.shape[0]):
         for h in range(accum_array.shape[1]):
             for w in range(accum_array.shape[2]):
@@ -1331,41 +1454,28 @@ def find_circles(img, accum_array, radius_values, hough_thresh):
                         rlist.append(rr)
     return returnlist
 
-def hough_circles(img):
+def hough_circles(img_idx):
     radius_values = []
     for radius in range(30):
         radius_values.append(radius)
-    inv_img = ~img
-    accum_array = hc_accum_array(inv_img, radius_values)
+    accum_array = hc_accum_array(img_idx, radius_values)
     hough_thresh = 30
-    result_list = find_circles(img, accum_array, radius_values, hough_thresh)
+    result_list = find_circles(accum_array, radius_values, hough_thresh)
     return result_list
 
-def find_curves(img):
-    #img = thicken_img(img, 1)
-    #img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    thick = thicken_img(img, 2)
-    thick = cv2.cvtColor(thick, cv2.COLOR_BGR2GRAY)
-    dimensions = img.shape
-    height = dimensions[0]
-    width = dimensions[1]
-    '''new = np.zeros((height, width, 3), np.uint8)
-    new = ~new
-    for y in range(0,height):
-        for x in range(0,width):
-            if img[y][x] <= 5:
-                new[y][x] = (0,0,0)'''
+def find_curves(img_idx):
+    HEIGHT, WIDTH = IMG_INFO[img_idx][0]
+    thicken_img(img_idx, 2)
+    BLACK_POINTS = IMG_INFO[img_idx][3]
     curve_list = []
-    detected_circles = hough_circles(img)#cv2.HoughCircles(img, cv2.HOUGH_GRADIENT, 1, 20, param1 = 20, param2 = 3, minRadius = 3, maxRadius = width)
-    if detected_circles is not None:
-        #detected_circles = np.uint16(np.around(detected_circles))
-        for circle in detected_circles:#[0, :]:
+    detected_circles = hough_circles(img_idx)
+    if detected_circles:
+        for circle in detected_circles:
             upper_curve_marks = {}
             lower_curve_marks = {}
-            a_int, b_int, r_int = circle[0], circle[1], circle[2]
-            #cv2.circle(new, (a_int, b_int), r_int, (0,0,255), 1)
+            a_int, b_int, r_int = circle
             for x in range(a_int - r_int, a_int + r_int):
-                if x >= 0 and x < width:
+                if x >= 0 and x < WIDTH:
                     upper_curve_marks[x] = []
                     y_1 = math.floor(calculate_y_val_on_circle(circle, x, 1))
                     y_2 = calculate_y_val_on_circle(circle, x + 1, 1)
@@ -1377,9 +1487,9 @@ def find_curves(img):
                         y_top = y_1
                         y_1 = temp
                     for y in range(y_1, y_top + 1):
-                        if y >= 0 and y < height:
-                            if thick[y][x] <= 5:
-                                upper_curve_marks[x].append(y)
+                        i_pt = img_dct_idx(WIDTH, y, x)
+                        if i_pt in BLACK_POINTS:
+                            upper_curve_marks[x].append(y)
                     lower_curve_marks[x] = []
                     second_y_1 = math.floor(calculate_y_val_on_circle(circle, x, -1))
                     second_y_2 = calculate_y_val_on_circle(circle, x + 1, -1)
@@ -1391,19 +1501,21 @@ def find_curves(img):
                         y_bottom = second_y_1
                         second_y_1 = temp
                     for y in range(second_y_1, y_bottom + 1):
-                        if y >= 0 and y < height:
-                            if thick[y][x] <= 5:
-                                lower_curve_marks[x].append(y)
+                        i_pt = img_dct_idx(WIDTH, y, x)
+                        if i_pt in BLACK_POINTS:
+                            lower_curve_marks[x].append(y)
             y_bound = 1
             last_y = -1
-            curve_between_halves = []
+            curve_between_halves = [set(), [[False for _ in range(WIDTH)] for _ in range(HEIGHT)], []]
             front_curve = []
             x = a_int - r_int
-            while x in range(a_int - r_int, a_int + r_int) and x >= 0 and x < width:
+            while x in range(a_int - r_int, a_int + r_int) and x >= 0 and x < WIDTH:
                 if len(upper_curve_marks[x]) != 0:
                     current_curve_marks = upper_curve_marks[x]
                     last_y = current_curve_marks[0]
-                    this_curve = []
+                    this_curve_list = []
+                    this_curve_set = set()
+                    this_curve_grid = [[False for _ in range(WIDTH)] for _ in range(HEIGHT)]
                     near_y = True
                     while x in upper_curve_marks and len(current_curve_marks) > 0 and near_y:
                         current_curve_marks.sort()
@@ -1413,15 +1525,18 @@ def find_curves(img):
                             if abs(y - last_y) > y_bound:
                                 near_y = False
                                 break
-                            this_curve.append((y, x))
+                            this_curve_list.append((y, x))
+                            this_curve_set.add((y, x))
+                            this_curve_grid[y][x] = True
                             last_y = y
                         x += 1
                         if x in upper_curve_marks:
                             current_curve_marks = upper_curve_marks[x]
+                    this_curve = (this_curve_set, this_curve_grid, this_curve_list)
                     if front_curve == []:
                         front_curve = this_curve
                     elif x in upper_curve_marks:
-                        if len(this_curve) >= 3:
+                        if len(this_curve_set) >= 3:
                             is_new_curve = True
                             new_curve_list = []
                             for curve in curve_list:
@@ -1439,14 +1554,15 @@ def find_curves(img):
                 if front_curve == []:
                     front_curve = -1
             x = a_int + r_int - 1
-            while x >= a_int - r_int and x >= 0 and x < width:
+            while x >= a_int - r_int and x >= 0 and x < WIDTH:
                 if len(lower_curve_marks[x]) != 0:
                     current_curve_marks = lower_curve_marks[x]
                     last_y = current_curve_marks[0]
-                    if x == a_int + r_int - 1 and curve_between_halves != []:
-                        last_y = curve_between_halves[len(curve_between_halves) - 1][0]
+                    if x == a_int + r_int - 1 and curve_between_halves[2] != []:
+                        last_y = curve_between_halves[2][len(curve_between_halves[2]) - 1][0]
                     this_curve = curve_between_halves
-                    curve_between_halves = []
+                    this_curve_set, this_curve_grid, this_curve_list = this_curve
+                    curve_between_halves = [set(), [[False for _ in range(WIDTH)] for _ in range(HEIGHT)], []]
                     near_y = True
                     while x in lower_curve_marks and len(current_curve_marks) > 0 and near_y:
                         current_curve_marks.sort()
@@ -1456,14 +1572,16 @@ def find_curves(img):
                             if abs(y - last_y) > y_bound:
                                 near_y = False
                                 break
-                            this_curve.append((y, x))
+                            this_curve_list.append((y, x))
+                            this_curve_set.add((y, x))
+                            this_curve_grid[y][x] = True
                             last_y = y
                         x -= 1
                         if x in lower_curve_marks:
                             current_curve_marks = lower_curve_marks[x]
                     if x not in lower_curve_marks and front_curve != -1:
                         this_curve += front_curve
-                    if len(this_curve) >= 3:
+                    if len(this_curve_set) >= 3:
                         is_new_curve = True
                         new_curve_list = []
                         for curve in curve_list:
@@ -1477,165 +1595,32 @@ def find_curves(img):
                         curve_list = new_curve_list
                 x -= 1
     final_list = remove_near_subset_elements(curve_list, 4)
+    print("done with FC")
     return final_list
 
-def find_edges_line_analysis(img, lines):
-    dimensions = img.shape
-    height = dimensions[0]
-    width = dimensions[1]
-    edge_list = []
-    #line_ct = len(lines)
-    #ct = 0
-    for line in lines:
-        #ct += 1
-        #print("Position: " + str(line_ct - ct))
-        m = calculate_slope(line, False)
-        if m != "UND":
-            '''b = calculate_y_val(line, 0)
-            if abs(m - desired_slope) <= 0.01 and abs(b - desired_b) <= 0.05:
-                print(line)
-                print(point_slope_form(line))
-                print("---")'''
-            x1 = line[0]
-            y1 = line[1] - calculate_y_val(line, 0)
-            '''a = 1 + m ** 2
-            b = (2 * x1 * (m ** 2)) + (-2 * m * y1)
-            c = -1 * (1 + ((m ** 2) * (x1 ** 2)) - (2 * m * x1 * y1) + (y1 ** 2))
-            first_x = (-b + math.sqrt((b ** 2) - (4 * a * c)))/(2 * a)
-            second_x = (-b - math.sqrt((b ** 2) - (4 * a * c)))/(2 * a)
-            x_step = first_x
-            if second_x > 0:
-                x_step = second_x'''
-            edge_marks = {}
-            '''for x_value in range(0, width):
-                y_value = calculate_y_val(line, x_value)
-                next_x_value = x_value + 1
-                next_y_value = calculate_y_val(line, next_x_value)
-                if x_value not in edge_marks:
-                    edge_marks[x_value] = []
-                start_index = math.floor(y_value)
-                end_index = math.floor(next_y_value)
-                if start_index > end_index:
-                    start_index = math.floor(next_y_value)
-                    end_index = math.floor(y_value)
-                for y_coordinate in range(start_index, end_index):
-                    if y_coordinate >= 0 and y_coordinate < height:
-                        if prep[y_coordinate][x_value] <= 5:
-                            edge_marks[x_value].append(y_coordinate)
-                calc_x_val = calculate_x_val(line, end_index)
-                if calc_x_val == "none":
-                    calc_x_val = x_value
-                if math.floor(calc_x_val) == x_value:
-                    if end_index >= 0 and end_index < height:
-                        if prep[end_index][x_value] <= 5:
-                            edge_marks[x_value].append(end_index)'''
-            for x in range(0, width):
-                edge_marks[x] = []
-                y_1 = math.floor(calculate_y_val(line, x))
-                y_2 = calculate_y_val(line, x + 1)
-                y_top = math.floor(y_2)
-                if y_2.is_integer():
-                    y_top -= 1
-                if y_top < y_1:
-                    temp = y_top
-                    y_top = y_1
-                    y_1 = temp
-                for y in range(y_1, y_top + 1):
-                    if y >= 0 and y < height:
-                        if img[y][x] <= 5:
-                            edge_marks[x].append(y)
-            last_y = -1
-            x = 0
-            while x in range(0, width):
-                if len(edge_marks[x]) != 0:
-                    current_edge_marks = edge_marks[x]
-                    if m < 0:
-                        current_edge_marks.reverse()
-                    last_y = current_edge_marks[0]
-                    y_bound = 1
-                    this_edge = []
-                    near_y = True
-                    while x in edge_marks and len(current_edge_marks) > 0 and near_y:
-                        current_edge_marks = edge_marks[x]
-                        if m < 0:
-                            current_edge_marks.reverse()
-                        for y in current_edge_marks:
-                            if abs(y - last_y) > y_bound:
-                                near_y = False
-                                break
-                            this_edge.append((y, x))
-                            last_y = y
-                        x += 1
-                    if len(this_edge) >= 3:
-                        is_new_edge = True
-                        new_edge_list = []
-                        for edge in edge_list:
-                            if is_near_subset(edge[1], this_edge, 5):
-                                continue
-                            elif is_near_subset(this_edge, edge[1], 5):
-                                is_new_edge = False
-                            new_edge_list.append(edge)
-                        if is_new_edge:
-                            new_edge_list.append((line, this_edge))
-                        edge_list = new_edge_list
-                x += 1
-        else:
-            edge_marks = {}
-            line_x_val = math.floor(line[0])
-            for y in range(0, height):
-                if img[y][line_x_val] <= 5:
-                    edge_marks[y] = True
-                else:
-                    edge_marks[y] = False
-            y = 0
-            while y in range(0, height):
-                if edge_marks[y] == True:
-                    this_edge = []
-                    current_edge_mark = edge_marks[y]
-                    while y in edge_marks and current_edge_mark == True:
-                        current_edge_mark = edge_marks[y]
-                        this_edge.append((y, line_x_val))
-                        y += 1
-                    if len(this_edge) >= 3:
-                        is_new_edge = True
-                        new_edge_list = []
-                        for edge in edge_list:
-                            if is_near_subset(edge[1], this_edge, 5):
-                                continue
-                            elif is_near_subset(this_edge, edge[1], 5):
-                                is_new_edge = False
-                            new_edge_list.append(edge)
-                        if is_new_edge:
-                            new_edge_list.append((line, this_edge))
-                        edge_list = new_edge_list
-                y += 1
-    edge_list = remove_near_subset_elements(edge_list, 5)
-    #print(edge_list)
-    return edge_list
-
-def hough_lines(edge_image, num_rhos=180, num_thetas=180, t_count=3):
-    edge_height, edge_width = edge_image.shape[:2]
-    edge_height_half, edge_width_half = edge_height / 2, edge_width / 2
-    d = np.sqrt(np.square(edge_height) + np.square(edge_width))
+def hough_lines(img_idx, num_rhos = 180, num_thetas = 180, t_count = 3):
+    HEIGHT, WIDTH = IMG_INFO[img_idx][0]
+    height_half, width_half = HEIGHT / 2, WIDTH / 2
+    d = np.sqrt(np.square(HEIGHT) + np.square(WIDTH))
     dtheta = 180 / num_thetas
     drho = (2 * d) / num_rhos
-    thetas = np.arange(0, 180, step=dtheta)
-    rhos = np.arange(-d, d, step=drho)
+    thetas = np.arange(0, 180, step = dtheta)
+    rhos = np.arange(-d, d, step = drho)
     cos_thetas = np.cos(np.deg2rad(thetas))
     sin_thetas = np.sin(np.deg2rad(thetas))
     accumulator = np.zeros((len(rhos), len(rhos)))
-    for y in range(edge_height):
-        for x in range(edge_width):
-            if edge_image[y][x] != 0:
-                edge_point = [y - edge_height_half, x - edge_width_half]
-                ys, xs = [], []
-                for theta_idx in range(len(thetas)):
-                    rho = (edge_point[1] * cos_thetas[theta_idx]) + (edge_point[0] * sin_thetas[theta_idx])
-                    theta = thetas[theta_idx]
-                    rho_idx = np.argmin(np.abs(rhos - rho))
-                    accumulator[rho_idx][theta_idx] += 1
-                    ys.append(rho)
-                    xs.append(theta)
+    BLACK_POINTS = IMG_INFO[img_idx][3]
+    for i_pt in BLACK_POINTS:
+        y, x = img_arr_idx(WIDTH, i_pt)
+        edge_point = [y - height_half, x - width_half]
+        ys, xs = [], []
+        for theta_idx in range(len(thetas)):
+            rho = (edge_point[1] * cos_thetas[theta_idx]) + (edge_point[0] * sin_thetas[theta_idx])
+            theta = thetas[theta_idx]
+            rho_idx = np.argmin(np.abs(rhos - rho))
+            accumulator[rho_idx][theta_idx] += 1
+            ys.append(rho)
+            xs.append(theta)
     lines = set()
     for y in range(accumulator.shape[0]):
         for x in range(accumulator.shape[1]):
@@ -1644,8 +1629,8 @@ def hough_lines(edge_image, num_rhos=180, num_thetas=180, t_count=3):
                 theta = thetas[x]
                 a = np.cos(np.deg2rad(theta))
                 b = np.sin(np.deg2rad(theta))
-                x0 = (a * rho) + edge_width_half
-                y0 = (b * rho) + edge_height_half
+                x0 = (a * rho) + width_half
+                y0 = (b * rho) + height_half
                 x1 = int(x0 + 1000 * (-b))
                 y1 = int(y0 + 1000 * (a))
                 x2 = int(x0 - 1000 * (-b))
@@ -1654,60 +1639,11 @@ def hough_lines(edge_image, num_rhos=180, num_thetas=180, t_count=3):
                 lines.add(line)
     return lines
 
-def find_edges(img, intersection_mode, img_objects = -1):
-    '''thick = thicken_img(img, 2)
-    thick = cv2.cvtColor(thick, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(img, 10, 20)
-    hough_lines = []
-    threshold = 10
-    for rho in range(0, 30):
-        for theta in range(0, 19):
-            current_hough_lines = cv2.HoughLines(edges, 0.1 + rho * 0.1, np.pi/(360 - 13 * theta), threshold, max_theta = 2 * np.pi)
-            if current_hough_lines is not None:
-                for line in current_hough_lines:
-                    hough_lines.append(line)
-    line_packages = []
-    lines = set()
-    for r_theta in hough_lines:
-        r,theta = r_theta[0]
-        a = np.cos(theta)
-        b = np.sin(theta)
-        x0 = a * r
-        y0 = b * r
-        x1 = int(x0 + 1000 * (-b))
-        y1 = int(y0 + 1000 * (a))
-        x2 = int(x0 - 1000 * (-b))
-        y2 = int(y0 - 1000 * (a))
-        lines.add((x1, y1, x2, y2))
-        if len(lines) == 20000:
-            line_packages.append(lines)
-            lines = set()
-    if len(lines) > 0:
-        line_packages.append(lines)
-    line_packages = []
-    current_lines = []
-    for line in lines:
-        current_lines.append(line)
-        if len(current_lines) == 20000:
-            line_packages.append(current_lines)
-            current_lines = []
-    if len(current_lines) > 0:
-        line_packages.append(current_lines)
-    edge_list = []
-    with Pool() as pool:
-        list_of_packages = [package for package in line_packages]
-        package_edge_lists = pool.starmap(find_edges_line_analysis, zip(repeat(thick), list_of_packages))
-    for list in package_edge_lists:
-        edge_list += list
-    final_list = remove_near_subset_elements(edge_list, 4)'''
-    dimensions = img.shape
-    height = dimensions[0]
-    width = dimensions[1]
+def find_edges(img_idx, intersection_mode, img_objects = -1):
+    '''global ins_time
+    ins_time = 0
     thickness_factor = 2 if intersection_mode else 4
-    #cv2.imwrite("first_FE_pre-thick.jpg", img)
-    thick = thicken_img(img, thickness_factor)
-    #cv2.imwrite("first_FE_post-thick.jpg", thick)
-    thick = cv2.cvtColor(thick, cv2.COLOR_BGR2GRAY)
+    thicken_img(img_idx, thickness_factor)
     if img_objects != -1:
         for object in img_objects:
             new_object = set()
@@ -1718,57 +1654,21 @@ def find_edges(img, intersection_mode, img_objects = -1):
                             new_object.add((iter_y, iter_x))
             img_objects.remove(object)
             img_objects.append(new_object)
-    lines = hough_lines(~thick)
+    BLACK_POINTS = IMG_INFO[img_idx][3]
+    HEIGHT, WIDTH = IMG_INFO[img_idx][0]
+    lines = hough_lines(img_idx)
+    #print(f"No. of Lines: {len(lines)}")
     edge_list = []
     line_ct = len(lines)
-    print(line_ct)
-    print("done")
-    print(stop)
     ct = 0
+    print(len(lines))
     for line in lines:
         ct += 1
         print("Position: " + str(line_ct - ct))
         m = calculate_slope(line, False)
         if m != "UND":
-            '''b = calculate_y_val(line, 0)
-            if abs(m - desired_slope) <= 0.01 and abs(b - desired_b) <= 0.05:
-                print(line)
-                print(point_slope_form(line))
-                print("---")'''
-            x1 = line[0]
-            y1 = line[1] - calculate_y_val(line, 0)
-            '''a = 1 + m ** 2
-            b = (2 * x1 * (m ** 2)) + (-2 * m * y1)
-            c = -1 * (1 + ((m ** 2) * (x1 ** 2)) - (2 * m * x1 * y1) + (y1 ** 2))
-            first_x = (-b + math.sqrt((b ** 2) - (4 * a * c)))/(2 * a)
-            second_x = (-b - math.sqrt((b ** 2) - (4 * a * c)))/(2 * a)
-            x_step = first_x
-            if second_x > 0:
-                x_step = second_x'''
             edge_marks = {}
-            '''for x_value in range(0, width):
-                y_value = calculate_y_val(line, x_value)
-                next_x_value = x_value + 1
-                next_y_value = calculate_y_val(line, next_x_value)
-                if x_value not in edge_marks:
-                    edge_marks[x_value] = []
-                start_index = math.floor(y_value)
-                end_index = math.floor(next_y_value)
-                if start_index > end_index:
-                    start_index = math.floor(next_y_value)
-                    end_index = math.floor(y_value)
-                for y_coordinate in range(start_index, end_index):
-                    if y_coordinate >= 0 and y_coordinate < height:
-                        if prep[y_coordinate][x_value] <= 5:
-                            edge_marks[x_value].append(y_coordinate)
-                calc_x_val = calculate_x_val(line, end_index)
-                if calc_x_val == "none":
-                    calc_x_val = x_value
-                if math.floor(calc_x_val) == x_value:
-                    if end_index >= 0 and end_index < height:
-                        if prep[end_index][x_value] <= 5:
-                            edge_marks[x_value].append(end_index)'''
-            for x in range(0, width):
+            for x in range(0, WIDTH):
                 edge_marks[x] = []
                 y_1 = math.floor(calculate_y_val(line, x))
                 y_2 = calculate_y_val(line, x + 1)
@@ -1780,19 +1680,19 @@ def find_edges(img, intersection_mode, img_objects = -1):
                     y_top = y_1
                     y_1 = temp
                 for y in range(y_1, y_top + 1):
-                    if y >= 0 and y < height:
-                        if thick[y][x] <= 5:
-                            edge_marks[x].append(y)
+                    i_pt = img_dct_idx(WIDTH, y, x)
+                    if i_pt in BLACK_POINTS:
+                        edge_marks[x].append(y)
             last_y = -1
             x = 0
-            while x in range(0, width):
+            while x in range(0, WIDTH):
                 if len(edge_marks[x]) != 0:
                     current_edge_marks = edge_marks[x]
                     if m < 0:
                         current_edge_marks.reverse()
                     last_y = current_edge_marks[0]
                     y_bound = 1
-                    this_edge = []
+                    this_edge_set = set()
                     near_y = True
                     while x in edge_marks and len(current_edge_marks) > 0 and near_y:
                         current_edge_marks = edge_marks[x]
@@ -1802,16 +1702,212 @@ def find_edges(img, intersection_mode, img_objects = -1):
                             if abs(y - last_y) > y_bound:
                                 near_y = False
                                 break
-                            this_edge.append((y, x))
+                            this_edge_set.add((y, x))
                             last_y = y
                         x += 1
-                    if len(this_edge) >= 3:
+                    if len(this_edge_set) >= 3:
+                        this_edge_grid = [[(j, i) in this_edge_set for i in range(WIDTH)] for j in range(HEIGHT)]
+                        this_edge = (this_edge_set, this_edge_grid)
                         is_new_edge = True
                         new_edge_list = []
                         for edge in edge_list:
                             if is_near_subset(edge[1], this_edge, 2*thickness_factor):
                                 continue
                             elif is_near_subset(this_edge, edge[1], 2*thickness_factor):
+                                is_new_edge = False
+                            new_edge_list.append(edge)
+                        if is_new_edge:
+                            if img_objects != -1:
+                                spl = sample(this_edge_set, math.ceil(len(this_edge_set)/10))
+                                object_point_counts = {}
+                                for object in img_objects:
+                                    object = tuple(object)
+                                    object_point_counts[object] = 0
+                                for point in spl:
+                                    for object in object_point_counts:
+                                        object = tuple(object)
+                                        if point in object:
+                                            object_point_counts[object] += 1
+                                max_count = 0
+                                for object in object_point_counts:
+                                    object = tuple(object)
+                                    if (count := object_point_counts[object]) > max_count:
+                                        max_count = count
+                                edge_object = -1
+                                for object in object_point_counts:
+                                    object = tuple(object)
+                                    if object_point_counts[object] == max_count:
+                                        edge_object = object
+                                new_edge_list.append((line, this_edge, edge_object))
+                            else:
+                                new_edge_list.append((line, this_edge))
+                        edge_list = new_edge_list
+                x += 1
+        else:
+            edge_marks = {}
+            line_x_val = math.floor(line[0])
+            if line_x_val >= 0 and line_x_val < WIDTH:
+                for y in range(0, HEIGHT):
+                    i_pt = img_dct_idx(img_idx, y, line_x_val)
+                    if i_pt in BLACK_POINTS:
+                        edge_marks[y] = True
+                    else:
+                        edge_marks[y] = False
+                y = 0
+                while y in range(0, HEIGHT):
+                    if edge_marks[y] == True:
+                        this_edge_set = set()
+                        this_edge_grid = [[False for _ in range(WIDTH)] for _ in range(HEIGHT)]
+                        current_edge_mark = edge_marks[y]
+                        while y in edge_marks and current_edge_mark == True:
+                            current_edge_mark = edge_marks[y]
+                            this_edge_set.add((y, line_x_val))
+                            this_edge_grid[y][line_x_val] = True
+                            y += 1
+                        this_edge = (this_edge_set, this_edge_grid)
+                        if len(this_edge_set) >= 3:
+                            is_new_edge = True
+                            new_edge_list = []
+                            for edge in edge_list:
+                                if is_near_subset(edge[1], this_edge, 2*thickness_factor):
+                                    continue
+                                elif is_near_subset(this_edge, edge[1], 2*thickness_factor):
+                                    is_new_edge = False
+                                new_edge_list.append(edge)
+                            if is_new_edge:
+                                if img_objects != -1:
+                                    spl = sample(this_edge_set, math.ceil(len(this_edge_set)/10))
+                                    object_point_counts = {}
+                                    for object in img_objects:
+                                        object = tuple(object)
+                                        object_point_counts[object] = 0
+                                    for point in spl:
+                                        for object in object_point_counts:
+                                            object = tuple(object)
+                                            if point in object:
+                                                object_point_counts[object] += 1
+                                    max_count = 0
+                                    for object in object_point_counts:
+                                        object = tuple(object)
+                                        if (count := object_point_counts[object]) > max_count:
+                                            max_count = count
+                                    edge_object = -1
+                                    for object in object_point_counts:
+                                        object = tuple(object)
+                                        if object_point_counts[object] == max_count:
+                                            edge_object = object
+                                    new_edge_list.append((line, this_edge, edge_object))
+                                else:
+                                    new_edge_list.append((line, this_edge))
+                            edge_list = new_edge_list
+                    y += 1
+    print("check")
+    print(f"INS TIME: {ins_time}s")
+    final_remove_factor = 1 if intersection_mode else 2
+    print(f"RAW EDGE NUM: {len(edge_list)}")
+    while len(edge_list) > 60:
+        edge_list.sort(key = lambda edge: len(edge[1]))
+        edge_list = edge_list[int(len(edge_list) * (3/4)):]
+        print(len(edge_list))
+    print(f"PRE REMOVAL EDGE NUM: {len(edge_list)}")
+    final_list = remove_near_subset_elements(edge_list, thickness_factor * final_remove_factor)
+    print(f"No. of Edges: {len(final_list)}")
+    return final_list'''
+    #h, w = IMG_INFO[img_idx][0]#####
+    #bp = IMG_INFO[img_idx][3]
+
+    thickness_factor = 2 if intersection_mode else 4
+    '''cv_img = np.zeros((h, w, 3), np.uint8)
+    cv_img = ~cv_img
+    for i_pt in bp:
+        y,x = img_arr_idx(w, i_pt)
+        cv_img[y, x] = (0,0,0)
+    cv2.imwrite("CIM_first_FE_pre-thick.jpg", cv_img)'''
+
+    thicken_img(img_idx, thickness_factor)
+
+    '''bp = IMG_INFO[img_idx][3]
+    cv_img = np.zeros((h, w, 3), np.uint8)
+    cv_img = ~cv_img
+    for i_pt in bp:
+        y,x = img_arr_idx(w, i_pt)
+        cv_img[y, x] = (0,0,0)
+    cv2.imwrite("CIM_first_FE_post-thick.jpg", cv_img)'''
+
+    if img_objects != -1:
+        for object in img_objects:
+            new_object = set()
+            for y, x in object:
+                for iter_y in range(y - 1, y + 2):
+                    for iter_x in range(x - 1, x + 2):
+                        if 0 <= iter_y < height and 0 <= iter_x < width:
+                            new_object.add((iter_y, iter_x))
+            img_objects.remove(object)
+            img_objects.append(new_object)
+    BLACK_POINTS = IMG_INFO[img_idx][3]
+    HEIGHT, WIDTH = IMG_INFO[img_idx][0]
+    lines = hough_lines(img_idx)
+    #print(f"No. of Lines: {len(lines)}")
+    edge_list = []
+    line_ct = len(lines)
+    ct = 0
+    print(line_ct)
+    print("done")
+    print(stop)
+    closeness_bound = 2 * thickness_factor
+    edge_grid = [[False for i in range(WIDTH)] for j in range(HEIGHT)]
+    point_nbrs = {(y, x) : {edge_grid[j][i] for j in range(y - closeness_bound, y + closeness_bound + 1) for i in range(x - closeness_bound, x + closeness_bound + 1) if 0 <= j < HEIGHT and 0 <= i < WIDTH} for y in range(HEIGHT) for x in range(WIDTH)}
+    for line in lines:
+        ct += 1
+        print("Position: " + str(line_ct - ct))
+        m = calculate_slope(line, False)
+        if m != "UND":
+            edge_marks = {}
+            for x in range(0, WIDTH):
+                edge_marks[x] = []
+                y_1 = math.floor(calculate_y_val(line, x))
+                y_2 = calculate_y_val(line, x + 1)
+                y_top = math.floor(y_2)
+                if y_2.is_integer():
+                    y_top -= 1
+                if y_top < y_1:
+                    temp = y_top
+                    y_top = y_1
+                    y_1 = temp
+                for y in range(y_1, y_top + 1):
+                    i_pt = img_dct_idx(WIDTH, y, x)
+                    if i_pt in BLACK_POINTS:
+                        edge_marks[x].append(y)
+            last_y = -1
+            x = 0
+            while x in range(0, WIDTH):
+                if len(edge_marks[x]) != 0:
+                    current_edge_marks = edge_marks[x]
+                    if m < 0:
+                        current_edge_marks.reverse()
+                    last_y = current_edge_marks[0]
+                    y_bound = 1
+                    this_edge = set()
+                    near_y = True
+                    while x in edge_marks and len(current_edge_marks) > 0 and near_y:
+                        current_edge_marks = edge_marks[x]
+                        if m < 0:
+                            current_edge_marks.reverse()
+                        for y in current_edge_marks:
+                            if abs(y - last_y) > y_bound:
+                                near_y = False
+                                break
+                            this_edge.add((y, x))
+                            last_y = y
+                        x += 1
+                    if len(this_edge) >= 3:
+                        edge_grid = [[(j, i) in this_edge for i in range(WIDTH)] for j in range(HEIGHT)]
+                        is_new_edge = True
+                        new_edge_list = []
+                        for edge in edge_list:
+                            if is_near_subset(edge[1], this_edge, closeness_bound, nbrs = point_nbrs):
+                                continue
+                            elif is_near_subset(this_edge, edge[1], closeness_bound): # Shiiiiiit; I have to account for this too... point_nbrs is only designed for the first call. (obv. I can just do no nbrs).
                                 is_new_edge = False
                             new_edge_list.append(edge)
                         if ct % 500 == 0:
@@ -1831,8 +1927,7 @@ def find_edges(img, intersection_mode, img_objects = -1):
                                 max_count = 0
                                 for object in object_point_counts:
                                     object = tuple(object)
-                                    count = object_point_counts[object]
-                                    if count > max_count:
+                                    if (count := object_point_counts[object]) > max_count:
                                         max_count = count
                                 edge_object = -1
                                 for object in object_point_counts:
@@ -1847,28 +1942,30 @@ def find_edges(img, intersection_mode, img_objects = -1):
         else:
             edge_marks = {}
             line_x_val = math.floor(line[0])
-            if line_x_val >= 0 and line_x_val < width:
-                for y in range(0, height):
-                    if thick[y][line_x_val] <= 5:
+            if line_x_val >= 0 and line_x_val < WIDTH:
+                for y in range(0, HEIGHT):
+                    i_pt = img_dct_idx(img_idx, y, line_x_val)
+                    if i_pt in BLACK_POINTS:
                         edge_marks[y] = True
                     else:
                         edge_marks[y] = False
                 y = 0
-                while y in range(0, height):
+                while y in range(0, HEIGHT):
                     if edge_marks[y] == True:
-                        this_edge = []
+                        this_edge = set()
                         current_edge_mark = edge_marks[y]
                         while y in edge_marks and current_edge_mark == True:
                             current_edge_mark = edge_marks[y]
-                            this_edge.append((y, line_x_val))
+                            this_edge.add((y, line_x_val))
                             y += 1
                         if len(this_edge) >= 3:
+                            edge_grid = [[(j, i) in this_edge for i in range(WIDTH)] for j in range(HEIGHT)]
                             is_new_edge = True
                             new_edge_list = []
                             for edge in edge_list:
-                                if is_near_subset(edge[1], this_edge, 2*thickness_factor):
+                                if is_near_subset(edge[1], this_edge, closeness_bound, nbrs = point_nbrs):
                                     continue
-                                elif is_near_subset(this_edge, edge[1], 2*thickness_factor):
+                                elif is_near_subset(this_edge, edge[1], closeness_bound):
                                     is_new_edge = False
                                 new_edge_list.append(edge)
                             if is_new_edge:
@@ -1886,8 +1983,7 @@ def find_edges(img, intersection_mode, img_objects = -1):
                                     max_count = 0
                                     for object in object_point_counts:
                                         object = tuple(object)
-                                        count = object_point_counts[object]
-                                        if count > max_count:
+                                        if (count := object_point_counts[object]) > max_count:
                                             max_count = count
                                     edge_object = -1
                                     for object in object_point_counts:
@@ -1899,55 +1995,27 @@ def find_edges(img, intersection_mode, img_objects = -1):
                                     new_edge_list.append((line, this_edge))
                             edge_list = new_edge_list
                     y += 1
+    print("check")
     final_remove_factor = 1 if intersection_mode else 2
-    if len(edge_list) > 60:
+    print(f"RAW EDGE NUM: {len(edge_list)}")
+    while len(edge_list) > 60:
         edge_list.sort(key = lambda edge: len(edge[1]))
         edge_list = edge_list[int(len(edge_list) * (3/4)):]
+        print(len(edge_list))
+    print(f"PRE REMOVAL EDGE NUM: {len(edge_list)}")
     final_list = remove_near_subset_elements(edge_list, thickness_factor * final_remove_factor)
+    print(f"No. of Edges: {len(final_list)}")
     return final_list
 
 def calculate_y_val(line, x_val):
-    '''x1 = line[0]
-    y1 = line[1]
-    x2 = line[2]
-    y2 = line[3]
-    m = 0
-    if x2 - x1 == 0:
-        m = "UND"
-    else:
-        m = (y2 - y1)/(x2 - x1)
-    if m != "UND":
-        return m * (x_val - x1) + y1
-    else:
-        return "none"# *'''
     x1, y1, x2, y2 = line
     return "none" if x2 - x1 == 0 else ((y2 - y1)/(x2 - x1)) * (x_val - x1) + y1
 
 def calculate_x_val(line, y_val):# *
-    '''x1 = line[0]
-    y1 = line[1]
-    x2 = line[2]
-    y2 = line[3]
-    m = 0
-    if x2 - x1 == 0:
-        m = "UND"
-    else:
-        m = (y2 - y1)/(x2 - x1)
-    if m != "UND" and m != 0:
-        return (y_val - y1)/m + x1
-    elif m == "UND":
-        return x1
-    else:
-        return "none"'''
     x1, y1, x2, y2 = line
     return "none" if x2 - x1 == 0 else (y_val - y1)/((y2 - y1)/(x2 - x1)) + x1
 
 def solve_quadratic(a, b, c):
-    '''if a == 0 or (b ** 2) - (4 * a * c) < 0:
-        return "none"
-    first_x = (-b + math.sqrt((b ** 2) - (4 * a * c)))/(2 * a)
-    second_x = (-b - math.sqrt((b ** 2) - (4 * a * c)))/(2 * a)
-    return (first_x, second_x)'''
     return "none" if  a == 0 or (b ** 2) - (4 * a * c) < 0 else ( (-b + math.sqrt((b ** 2) - (4 * a * c)))/(2 * a) , (-b - math.sqrt((b ** 2) - (4 * a * c)))/(2 * a) )
 
 def calculate_intersection(structure1, structure2):
@@ -2060,12 +2128,11 @@ def calculate_intersection(structure1, structure2):
             second_point = (second_y, x)
             return [first_point, second_point]
 
-def find_intersections(img):
-    dimensions = img.shape
-    height = dimensions[0]
-    width = dimensions[1]
-    curves = find_curves(img)
-    edges = find_edges(img, True)
+def find_intersections(img_idx):
+    HEIGHT, WIDTH = IMG_INFO[img_idx][0]
+    #curves = find_curves(img_idx)
+    print("START FIND EDGES")
+    edges = find_edges(img_idx, True)
     structure_list = curves + edges
     final_structures = remove_near_subset_elements(structure_list, 2)
     models = set()
@@ -2087,27 +2154,6 @@ def find_intersections(img):
         intersections = calculate_intersection(model1, model2)
         for intersection in intersections:
             rounded_intersection = floor_point(intersection)
-            '''rounded_y = rounded_intersection[0]
-            rounded_x = rounded_intersection[1]
-            found = False
-            for y in range(rounded_y - 1, rounded_y + 2):
-                for x in range(rounded_x - 1, rounded_x + 2):
-                    if y >= 0 and y < height and x >= 0 and x < width:
-                        if img[y][x] <= 5:
-                            is_new_intersection = True
-                            for point in final_intersections:
-                                check_y = point[0]
-                                check_x = point[1]
-                                closeness_bound = 1
-                                if abs(y - check_y) <= closeness_bound and abs(x - check_x) <= closeness_bound:
-                                    is_new_intersection = False
-                                    break
-                            if is_new_intersection:
-                                final_intersections.add((y, x))
-                                found = True
-                                break
-                if found:
-                    break'''
             rounded_y = rounded_intersection[0]
             rounded_x = rounded_intersection[1]
             potential_intersections = {}
@@ -2136,394 +2182,62 @@ def find_intersections(img):
                 if distance == min_distance:
                     final_intersections.add(point)
                     break
-            '''y, x = rounded_intersection
-            if y >= 0 and y < height and x >= 0 and x < width:
-                if img[y][x] <= 5:
-                    is_new_intersection = True
-                    for point in final_intersections:
-                        check_y = point[0]
-                        check_x = point[1]
-                        closeness_bound = 1
-                        if abs(y - check_y) <= closeness_bound and abs(x - check_x) <= closeness_bound:
-                            is_new_intersection = False
-                            break
-                    if is_new_intersection:
-                        final_intersections.add((y, x))'''
-    final_intersections = list(final_intersections)
+    final_intersections = [img_dct_idx(img_idx, y, x) for y, x in final_intersections]
     return final_intersections
 
-def find_open_points(img):
-    dimensions = img.shape
-    height = dimensions[0]
-    width = dimensions[1]
-    open_points = []
-    for x in range(0, width):
-        for y in range(0, height):
-            if img[y][x] <= 5:
-                nearby_points = []
-                for x_add in range(-1, 2):
-                    for y_add in range(-1, 2):
-                        new_x = x + x_add
-                        new_y = y + y_add
-                        if new_x < 0 or new_x >= width or new_y < 0 or new_y >= height or (x_add == y_add == 0):
-                            continue
-                        if img[new_y][new_x] <= 5:
-                            nearby_points.append((new_y, new_x))
-                if len(nearby_points) <= 1:
-                    open_points.append((y, x))
-    return open_points
+def find_open_points(img_idx):
+    BLACK_POINTS_BLACK_NBRS = IMG_INFO[img_idx][7]
+    for i_pt in BLACK_POINTS_BLACK_NBRS:
+        if len(BLACK_POINTS_BLACK_NBRS[i_pt]) == 1:
+            return i_pt
+    return -1
 
-def propagation_helper(img, start_point):
-    '''print(current_point)
-    print(point_list)
-    #print(all_point_lists)
-    dimensions = img.shape
-    height = dimensions[0]
-    width = dimensions[1]
-    if current_point not in point_list:
-        point_list.append(current_point)
-    next_points = []
-    up = (current_point[0] + 1, current_point[1])
-    right = (current_point[0], current_point[1] + 1)
-    down = (current_point[0] - 1, current_point[1])
-    left = (current_point[0], current_point[1] - 1)
-    adjacent_points  = (up, right, down, left)
-    for point in adjacent_points:
-        y = point[0]
-        x = point[1]
-        if (y >= 0 and y < height) and (x >= 0 and x < width):
-            if img[y][x] <= 5:
-                if point not in point_list and point not in next_points:
-                    next_points.append(point)
-    top_right = (current_point[0] + 1, current_point[1] + 1)
-    bottom_right = (current_point[0] - 1, current_point[1] + 1)
-    bottom_left = (current_point[0] - 1, current_point[1] - 1)
-    top_left = (current_point[0] + 1, current_point[1] - 1)
-    diagonal_points = (top_right, bottom_right, bottom_left, top_left)
-    for point in diagonal_points:
-        y = point[0]
-        x = point[1]
-        if (y >= 0 and y < height) and (x >= 0 and x < width):
-            if img[y][x] <= 5:
-                if point not in point_list and point not in next_points:
-                    next_points.append(point)
-    if next_points == []:
-        surrounding_points = adjacent_points + diagonal_points
-        for point in surrounding_points:
-            y = point[0]
-            x = point[1]
-            if (y >= 0 and y < height) and (x >= 0 and x < width):
-                if img[y][x] <= 5:
-                    new_up = (current_point[0] + 1, current_point[1])
-                    new_right = (current_point[0], current_point[1] + 1)
-                    new_down = (current_point[0] - 1, current_point[1])
-                    new_left = (current_point[0], current_point[1] - 1)
-                    new_adjacent_points  = (new_up, new_right, new_down, new_left)
-                    for new_point in new_adjacent_points:
-                        y = new_point[0]
-                        x = new_point[1]
-                        if (y >= 0 and y < height) and (x >= 0 and x < width):
-                            if img[y][x] <= 5:
-                                if new_point not in point_list and new_point not in next_points:
-                                    next_points.append(new_point)
-                    new_top_right = (current_point[0] + 1, current_point[1] + 1)
-                    new_bottom_right = (current_point[0] - 1, current_point[1] + 1)
-                    new_bottom_left = (current_point[0] - 1, current_point[1] - 1)
-                    new_top_left = (current_point[0] + 1, current_point[1] - 1)
-                    new_diagonal_points = (new_top_right, new_bottom_right, new_bottom_left, new_top_left)
-                    for new_point in new_diagonal_points:
-                        y = new_point[0]
-                        x = new_point[1]
-                        if (y >= 0 and y < height) and (x >= 0 and x < width):
-                            if img[y][x] <= 5:
-                                if new_point not in point_list and new_point not in next_points:
-                                    next_points.append(new_point)
-    print("NP: " + str(next_points))
-    print("---")
-    for existing_point_list in all_point_lists:
-        if set(existing_point_list).issubset(set(point_list)):
-            all_point_lists.remove(existing_point_list)
-    all_point_lists.append(point_list)
-    for point in next_points:
-        copy_point_list = point_list.copy()
-        copy_all_point_lists = all_point_lists.copy()
-        new_point_lists = propagation_helper(img, point, copy_point_list, copy_all_point_lists)
-        for list in new_point_lists:
-            if list not in all_point_lists:
-                all_point_lists.append(list)
-    return all_point_lists'''
-
-    '''dimensions = img.shape
-    height = dimensions[0]
-    width = dimensions[1]
-    if current_point not in point_list:
-        point_list.append(current_point)
-    y, x = current_point
-    next_segments = [[]]
-    first_level_neighbor_coords = ((1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1), (0, 1))
-    first_level_marked_neighbors = []
-    for coord in first_level_neighbor_coords:
-        new_y = y + coord[0]
-        new_x = x + coord[1]
-        if new_y >= 0 and new_y < height and new_x >= 0 and new_x < width:
-            first_level_marked_neighbors.append(img[new_y][new_x] <= 5)
-        else:
-            first_level_marked_neighbors.append(False)
-    first_level_first_index_marked = False
-    for index in range(0, 8):
-        front_segment = -1
-        front_segment = next_segments[len(next_segments) - 1]
-        if first_level_marked_neighbors[index] == False:
-            if front_segment != []:
-                next_segments.append([])
-        else:
-            coord = first_level_neighbor_coords[index]
-            new_y = y + coord[0]
-            new_x = x + coord[1]
-            if index % 2 == 1:
-                front_segment.insert(0, (new_y, new_x))
-            else:
-                front_segment.append((new_y, new_x))
-            if index == 0:
-                first_level_first_index_marked = True
-            if index == 7 and first_level_first_index_marked and len(next_segments) > 1:
-                first_segment = next_segments.pop(0)
-                for point in first_segment:
-                    point_y, point_x = point
-                    relative_coords = (point_y - y, point_x - x)
-                    point_index = first_level_neighbor_coords.index(relative_coords)
-                    if point_index % 2 == 1:
-                        front_segment.insert(0, point)
-                    else:
-                        front_segment.append(point)
-    if next_segments == [[]]:
-        second_level_neighbor_coords = ((2, 2), (2, 1), (2, 0), (2, -1), (2, -2), (1, -2), (0, -2), (-1, -2), (-2, -2), (-2, -1), (-2, 0), (-2, 1), (-2, 2), (-1, 2), (0, 2), (1, 2))
-        second_level_marked_neighbors = []
-        for coord in second_level_neighbor_coords:
-            new_y = y + coord[0]
-            new_x = x + coord[1]
-            if new_y >= 0 and new_y < height and new_x >= 0 and new_x < width:
-                second_level_marked_neighbors.append(img[new_y][new_x] <= 5)
-            else:
-                second_level_marked_neighbors.append(False)
-        second_level_first_index_marked = False
-        for index in range(0, 8):
-            front_segment = -1
-            front_segment = next_segments[len(next_segments) - 1]
-            if second_level_marked_neighbors[index] == False:
-                if front_segment != []:
-                    next_segments.append([])
-            else:
-                coord = second_level_neighbor_coords[index]
-                new_y = y + coord[0]
-                new_x = x + coord[1]
-                front_segment.append((new_y, new_x))
-                if index == 0:
-                    second_level_first_index_marked = True
-                if index == 7 and second_level_first_index_marked and len(next_segments) > 1:
-                    first_segment = next_segments.pop(0)
-                    for point in first_segment:
-                        front_segment.append(point)
-    for existing_point_list in all_point_lists:
-        if set(existing_point_list).issubset(set(point_list)):
-            all_point_lists.remove(existing_point_list)
-    all_point_lists.append(point_list)
-    for segment in next_segments:
-        copy_point_list = point_list.copy()
-        copy_all_point_lists = all_point_lists.copy()
-        next_point = -1
-        for point in segment:
-            if point not in point_list:
-                next_point = point
-        if next_point != -1:
-            new_point_lists = propagation_helper(img, next_point, copy_point_list, copy_all_point_lists)
-            for list in new_point_lists:
-                if list not in all_point_lists:
-                    all_point_lists.append(list)
-    return all_point_lists'''
-
-    '''dimensions = img.shape
-    height = dimensions[0]
-    width = dimensions[1]
-    if point_tree == -1:
-        point_list.append(current_point)
-        point_tree = Node(current_point)
-    else:
-        point_tree = Node(current_point, parent = point_tree)
-    y, x = current_point
-    next_segments = [[]]
-    first_level_neighbor_coords = ((1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1), (0, 1))
-    first_level_marked_neighbors = []
-    for coord in first_level_neighbor_coords:
-        new_y = y + coord[0]
-        new_x = x + coord[1]
-        if new_y >= 0 and new_y < height and new_x >= 0 and new_x < width:
-            first_level_marked_neighbors.append(img[new_y][new_x] <= 5)
-        else:
-            first_level_marked_neighbors.append(False)
-    first_level_first_index_marked = False
-    for index in range(0, 8):
-        front_segment = -1
-        front_segment = next_segments[len(next_segments) - 1]
-        if first_level_marked_neighbors[index] == False:
-            if front_segment != []:
-                next_segments.append([])
-        else:
-            coord = first_level_neighbor_coords[index]
-            new_y = y + coord[0]
-            new_x = x + coord[1]
-            if index % 2 == 1:
-                front_segment.insert(0, (new_y, new_x))
-            else:
-                front_segment.append((new_y, new_x))
-            if index == 0:
-                first_level_first_index_marked = True
-            if index == 7 and first_level_first_index_marked and len(next_segments) > 1:
-                first_segment = next_segments.pop(0)
-                for point in first_segment:
-                    point_y, point_x = point
-                    relative_coords = (point_y - y, point_x - x)
-                    point_index = first_level_neighbor_coords.index(relative_coords)
-                    if point_index % 2 == 1:
-                        front_segment.insert(0, point)
-                    else:
-                        front_segment.append(point)
-    next_points = []
-    for segment in next_segments:
-        next_point = -1
-        for point in segment:
-            if point not in point_list:
-                next_point = point
-                break
-        if next_point != -1:
-            point_list.append(next_point)
-            next_points.append(next_point)
-    for point in next_points:
-        return_tree = propagation_helper(img, point, point_list, point_tree)
-    return (point_tree, point_list)'''
-
-    dimensions = img.shape
-    height = dimensions[0]
-    width = dimensions[1]
-    point_list = [start_point]
-    start_tree = Node(start_point)
+def propagation_helper(img_idx, i_pt_start):
+    idx_list = [i_pt_start]
+    start_tree = Node(i_pt_start)
     tree_stack = [start_tree]
-    while len(tree_stack) > 0:
+    while tree_stack:
         current_tree = tree_stack.pop(len(tree_stack) - 1)
-        current_point = current_tree.name
-        y, x = current_point
-        next_segments = [[]]
-        first_level_neighbor_coords = ((1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1), (0, 1))
-        first_level_marked_neighbors = []
-        for coord in first_level_neighbor_coords:
-            new_y = y + coord[0]
-            new_x = x + coord[1]
-            if new_y >= 0 and new_y < height and new_x >= 0 and new_x < width:
-                first_level_marked_neighbors.append(img[new_y][new_x] <= 5)
-            else:
-                first_level_marked_neighbors.append(False)
-        first_level_first_index_marked = False
-        for index in range(0, 8):
-            front_segment = -1
-            front_segment = next_segments[len(next_segments) - 1]
-            if first_level_marked_neighbors[index] == False:
-                if front_segment != []:
-                    next_segments.append([])
-            else:
-                coord = first_level_neighbor_coords[index]
-                new_y = y + coord[0]
-                new_x = x + coord[1]
-                if index % 2 == 1:
-                    front_segment.insert(0, (new_y, new_x))
-                else:
-                    front_segment.append((new_y, new_x))
-                if index == 0:
-                    first_level_first_index_marked = True
-                if index == 7 and first_level_first_index_marked and len(next_segments) > 1:
-                    first_segment = next_segments.pop(0)
-                    for point in first_segment:
-                        point_y, point_x = point
-                        relative_coords = (point_y - y, point_x - x)
-                        point_index = first_level_neighbor_coords.index(relative_coords)
-                        if point_index % 2 == 1:
-                            front_segment.insert(0, point)
-                        else:
-                            front_segment.append(point)
-        next_points = []
+        current_idx = current_tree.name
+        next_segments = get_neighbor_segments(img_idx, current_idx)
+        next_idxs = []
         for segment in next_segments:
-            next_point = -1
-            for point in segment:
-                if point not in point_list:
-                    next_point = point
+            for i_pt in segment:
+                if i_pt not in idx_list:
+                    idx_list.append(next_idx)
+                    next_idxs.append(next_idx)
                     break
-            if next_point != -1:
-                point_list.append(next_point)
-                next_points.append(next_point)
-        for point in next_points:
+        for i_pt in next_idxs:
             next_tree = Node(point, parent = current_tree)
             tree_stack.append(next_tree)
-    return (start_tree, point_list)
+    return (start_tree, idx_list)
 
-def get_ordered_point_tree(img, intersections, open_points): # assume given img has 1 obj
-    dimensions = img.shape
-    height = dimensions[0]
-    width = dimensions[1]
+def get_ordered_point_tree(img_idx, intersections, open_point): # assume given img has 1 obj
     start_point = -1
-    if len(intersections) == 0:
-        if len(open_points) == 0:
-            for x in range(0, width):
-                for y in range(0, height):
-                    if img[y][x] <= 5:
-                        start_point = (y, x)
-                        break
-                if start_point != -1:
-                    break
+    if intersections:
+        if open_point != -1:
+            BLACK_POINTS = IMG_INFO[img_idx][3]
+            start_point = BLACK_POINTS[0]
         else:
-            start_point = open_points[0]
+            start_point = open_point
     else:
         start_point = intersections[0]
-    return propagation_helper(img, start_point)
+    return propagation_helper(img_idx, start_point)
+
+def get_set_of_points_from_point_binary(img_idx, i_pt_start, value):
+    i_pt_set = set()
+    i_pt_queue = [i_pt_start]
+    NEIGHBORS = IMG_INFO[img_idx][4] if value == False else IMG_INFO[img_idx][7]
+    for i_pt in i_pt_queue:
+        if i_pt in NEIGHBORS:
+            nbrs = NEIGHBORS[i_pt]
+            for nbr in nbrs:
+                if nbr not in i_pt_set:
+                    i_pt_queue.append(nbr)
+                    i_pt_set.add(nbr)
+    return i_pt_set
 
 def get_set_of_points_from_point(img, start_point, color, pil_img = -1): # 0 = black ; 1 = white ; 2 = nonwhite ; 3 = pseudowhite ; 4 = transparent # 5 = gradient
-    '''dimensions = img.shape
-    height = dimensions[0]
-    width = dimensions[1]
-    point_set.add(current_point)
-    surrounding_points = []
-    up = (current_point[0] + 1, current_point[1])
-    right = (current_point[0], current_point[1] + 1)
-    down = (current_point[0] - 1, current_point[1])
-    left = (current_point[0], current_point[1] - 1)
-    adjacent_points  = (up, right, down, left)
-    for point in adjacent_points:
-        y = point[0]
-        x = point[1]
-        if (y >= 0 and y < height) and (x >= 0 and x < width):
-            if color == 0:
-                if img[y][x] <= 5 and (y, x) not in point_set:
-                    surrounding_points.append(point)
-            elif color == 1:
-                if img[y][x] >= 250 and (y, x) not in point_set:
-                    surrounding_points.append(point)
-    top_right = (current_point[0] + 1, current_point[1] + 1)
-    bottom_right = (current_point[0] - 1, current_point[1] + 1)
-    bottom_left = (current_point[0] - 1, current_point[1] - 1)
-    top_left = (current_point[0] + 1, current_point[1] - 1)
-    diagonal_points = (top_right, bottom_right, bottom_left, top_left)
-    for point in diagonal_points:
-        y = point[0]
-        x = point[1]
-        if (y >= 0 and y < height) and (x >= 0 and x < width):
-            if color == 0:
-                if img[y][x] <= 5 and (y, x) not in point_set:
-                    surrounding_points.append(point)
-            elif color == 1:
-                if img[y][x] >= 250 and (y, x) not in point_set:
-                    surrounding_points.append(point)
-    for point in surrounding_points:
-        point_set.add(point)
-        point_set = point_set.union(get_set_of_points_from_point(img, point, point_set, color))
-    return point_set'''
     dimensions = img.shape
     height = dimensions[0]
     width = dimensions[1]
@@ -2609,82 +2323,74 @@ def get_set_of_points_from_point(img, start_point, color, pil_img = -1): # 0 = b
             point_queue.append(point)
     return final_point_set
 
-def get_separate_objects(img):
-    dimensions = img.shape
-    height = dimensions[0]
-    width = dimensions[1]
-    objects = []
+def get_separate_objects(img_idx):
     object_point_lists = []
-    for y in range(0, height):
-        for x in range(0, width):
-            if img[y][x] <= 5:
-                point = (y, x)
-                in_new_object = True
-                for list in object_point_lists:
-                    if point in list:
-                        in_new_object = False
-                        break
-                if in_new_object:
-                    set_of_points = get_set_of_points_from_point(img, point, 0)
-                    object_point_lists.append(set_of_points)
+    BLACK_POINTS = IMG_INFO[img_idx][3]
+    for i_pt in BLACK_POINTS:
+        in_new_object = True
+        for object in object_point_lists:
+            if i_pt in object:
+                in_new_object = False
+                break
+        if in_new_object:
+            object_point_list = get_set_of_points_from_point_binary(img_idx, i_pt, True)
+            object_point_lists.append(object_point_list)
+    objects = []
+    DIMENSIONS = IMG_INFO[img_idx][0]
     for object_point_list in object_point_lists:
-        intersections = ordered_list_of_pts = closed = False
-        obj_img = np.zeros((height, width, 3), np.uint8)
-        obj_img = ~obj_img
-        for point in object_point_list:
-            y = point[0]
-            x = point[1]
-            obj_img[y][x] = 0
-        obj_img = cv2.cvtColor(obj_img, cv2.COLOR_BGR2GRAY)
-        intersections = find_intersections(obj_img)
-        open_points = find_open_points(obj_img)
-        (ordered_point_tree, point_list) = get_ordered_point_tree(obj_img, intersections, open_points)
-        if len(open_points) == 0:
-            closed = True
+        intersections = ordered_list_of_points = False
+        object_img_idx = initialize_img(DIMENSIONS)
+        change_points(object_point_list, True, object_img_idx, 0)
+        intersections = find_intersections(object_img_idx)
+        open_point = find_open_points(object_img_idx)
+        (ordered_point_tree, point_list) = get_ordered_point_tree(object_img_idx, intersections, open_point)
         object = (intersections, ordered_point_tree, point_list)
         objects.append(object)
     return objects
 
-def get_ordered_lists_of_points_from_tree(tree):
+def get_branches_of_points_from_tree(tree):
     ordered_lists_of_points = []
     ordered_list_of_points = []
+    sets_of_points = []
+    set_of_points = set()
     tree_parser = tree
     while len(tree_parser.children) == 1:
-        ordered_list_of_points.append(tree_parser.name)
+        point = tree_parser.name
+        ordered_list_of_points.append(point)
+        set_of_points.add(point)
         tree_parser = tree_parser.children[0]
-    ordered_list_of_points.append(tree_parser.name)
+    point = tree_parser.name
+    ordered_list_of_points.append(point)
+    set_of_points.add(point)
     ordered_lists_of_points.append(ordered_list_of_points)
+    sets_of_points.append(set_of_points)
     for subtree in tree_parser.children:
-        ordered_lists_of_points += get_ordered_lists_of_points_from_tree(subtree)
-    return ordered_lists_of_points
+        sub_ordered_lists_of_points, sub_sets_of_points = get_branches_of_points_from_tree(subtree)
+        ordered_lists_of_points += sub_ordered_lists_of_points
+        sets_of_points += sub_sets_of_points
+    return ordered_lists_of_points, sets_of_points
 
-def linear_approximation(img):
-    objects = get_separate_objects(img)
-    dimensions = img.shape
-    height = dimensions[0]
-    width = dimensions[1]
-    linear_approximation_img = np.zeros((height, width, 3), np.uint8)
-    linear_approximation_img = ~linear_approximation_img
+def linear_approximation(img_idx):
+    objects = get_separate_objects(img_idx)
+    DIMENSIONS = IMG_INFO[img_idx][0]
+    lin_app_img_idx = initialize_img(DIMENSIONS)
+    HEIGHT, WIDTH = DIMENSIONS
     drawn_objects = []
     for object in objects:
         intersections, ordered_point_tree, point_list = object
-        ordered_lists_of_points = get_ordered_lists_of_points_from_tree(ordered_point_tree)
+        ordered_lists_of_points, sets_of_points = get_branches_of_points_from_tree(ordered_point_tree)
         new_intersections = []
         for intersection in intersections:
-            surrounding_points = []
-            y, x = intersection
-            for iter_y in range(-1, 2):
-                for iter_x in range(-1, 2):
-                    if iter_y != 0 or iter_x != 0:
-                        surrounding_points.append((y + iter_y, x + iter_x))
+            y, x = img_arr_idx(WIDTH, intersection)
+            surrounding_points = [img_dct_idx(y + iy, x + ix) for iy in range(-1, 2) for ix in range(-1, 2) if (iter_y != 0 or iter_x != 0) and 0 <= y < HEIGHT and 0 <= x < WIDTH]
             current_new_intersections = [intersection]
             for point in surrounding_points:
                 is_new_intersection = False
-                for list_of_points in ordered_lists_of_points:
-                    if point in list_of_points:
+                for set_of_points in sets_of_points:
+                    if point in set_of_points:
                         is_alone = True
                         for current_new_intersection in current_new_intersections:
-                            if current_new_intersection in list_of_points:
+                            if current_new_intersection in set_of_points:
                                 is_alone = False
                                 break
                         if is_alone:
@@ -2693,32 +2399,27 @@ def linear_approximation(img):
                 if is_new_intersection:
                     current_new_intersections.append(point)
             new_intersections += current_new_intersections
-        all_points = []
-        for list in ordered_lists_of_points:
-            all_points += list
+        point_num = sum(len(set_of_points) for set_of_points in sets_of_points)
         segment_length = 10
-        possible_length = math.floor(len(all_points)/8)
+        possible_length = math.floor(point_num/8)
         if possible_length > segment_length:
             segment_length = possible_length
-        linear_approximation_img, drawn_object = linear_approximation_helper(linear_approximation_img, new_intersections, ordered_point_tree, segment_length, [])
-        drawn_objects.append(set(drawn_object))
-    return linear_approximation_img, drawn_objects
+        draw_points = linear_approximation_helper(new_intersections, ordered_lists_of_points, 0, segment_length, set())
+        drawn_objects.append(draw_points)
+        change_points(draw_points, True, lin_app_img_idx, 1)
+    return lin_app_img_idx, drawn_objects
 
-def linear_approximation_helper(linear_approximation_img, intersections, ordered_point_tree, segment_length, drawn_object):
-    ordered_list_of_points = []
-    tree_parser = ordered_point_tree
-    while len(tree_parser.children) == 1:
-        ordered_list_of_points.append(tree_parser.name)
-        tree_parser = tree_parser.children[0]
-    ordered_list_of_points.append(tree_parser.name)
+def linear_approximation_helper(intersections, ordered_lists_of_points, branch_idx, segment_length, draw_points): # Branch index scheme might not work
+    ordered_list_of_points = ordered_lists_of_points[branch_idx]
+    branch_idx += 1
     focus_points_indices = []
     focus_points_indices.append(len(ordered_list_of_points) - 1)
     for intersection in intersections:
-        for index in range(0, len(ordered_list_of_points)):
+        for index in range(len(ordered_list_of_points)):
             if ordered_list_of_points[index] == intersection:
                 focus_points_indices.append(len(ordered_list_of_points) - 1 - index)
                 break
-    ordered_list_of_points.reverse()
+    ordered_list_of_points = reversed(ordered_list_of_points)
     focus_points_indices.sort()
     stop_points_indices = [0]
     first_point_index = second_point_index = 0
@@ -2735,51 +2436,41 @@ def linear_approximation_helper(linear_approximation_img, intersections, ordered
             focus_points_encountered += 1
         stop_points_indices.append(second_point_index)
     for index in range(0, len(stop_points_indices) - 1):
-        first_point = ordered_list_of_points[stop_points_indices[index]]
-        second_point = ordered_list_of_points[stop_points_indices[index + 1]]
-        linear_approximation_img[first_point[0]][first_point[1]] = (0, 0, 0)
-        drawn_object.append((first_point[0], first_point[1]))
-        if second_point == ordered_list_of_points[len(ordered_list_of_points) - 1]:
-            linear_approximation_img[second_point[0]][second_point[1]] = (0, 0, 0)
-            drawn_object.append((second_point[0], second_point[1]))
-        line = (first_point[1], first_point[0], second_point[1], second_point[0])
+        i_pt_1 = ordered_list_of_points[stop_points_indices[index]]
+        i_pt_2 = ordered_list_of_points[stop_points_indices[index + 1]]
+        y1, x1 = img_arr_idx(WIDTH, i_pt_1)
+        y2, x2 = img_arr_idx(WIDTH, i_pt_2)
+        draw_points.add(i_pt_1)
+        if i_pt_2 == ordered_list_of_points[len(ordered_list_of_points) - 1]:
+            draw_points.add(i_pt_2)
+        line = (x1, y1, x2, y2)
         if calculate_slope(line, False) == "UND":
-            y_value = first_point[0]
-            next_y_value = second_point[0]
-            if next_y_value < y_value:
-                y_value = second_point[0]
-                next_y_value = first_point[0]
-            for y in range(y_value, next_y_value):
-                linear_approximation_img[y][first_point[1]] = (0, 0, 0)
-                drawn_object.append((y, first_point[1]))
+            if y2 < y1:
+                y1, y2 = y2, y1
+            for y in range(y1, y2):
+                draw_points.add((y, x1))
         else:
-            x_value = first_point[1]
-            next_pt_x_value = second_point[1]
-            if next_pt_x_value < x_value:
-                x_value = second_point[1]
-                next_pt_x_value = first_point[1]
-            for x in range(x_value, next_pt_x_value):
-                y_value = calculate_y_val(line, x)
-                next_y_value = calculate_y_val(line, x + 1)
-                slope_sign = 1
-                if next_y_value < y_value:
-                    y_value = calculate_y_val(line, x + 1)
-                    next_y_value = calculate_y_val(line, x)
-                    slope_sign = -1
-                for y in range(math.floor(y_value), math.ceil(next_y_value)):
-                    start_x = calculate_x_val(line, y)
-                    end_x = calculate_x_val(line, y + 1)
-                    if y == math.ceil(next_y_value) - 1 * slope_sign:
-                        end_x = x + 1 * slope_sign
-                    middle_x = (start_x + end_x)/2
-                    middle_y = calculate_y_val(line, middle_x)
-                    linear_approximation_img[math.floor(middle_y)][x] = (0, 0, 0)
-                    drawn_object.append((math.floor(middle_y), x))
-                linear_approximation_img[math.floor(y_value)][x] = (0, 0, 0)
-                drawn_object.append((math.floor(y_value), x))
+            if x2 < x1:
+                x1, x2 = x2, x1
+            for x in range(x1, x2):
+                y_val = calculate_y_val(line, x)
+                next_y_val = calculate_y_val(line, x + 1)
+                m_sign = 1
+                if next_y_val < y_val:
+                    y_val, next_y_val = next_y_val, y_val
+                    m_sign = -1
+                for y in range(math.floor(y_val), math.ceil(next_y_val)):
+                    x_start = calculate_x_val(line, y)
+                    x_end = calculate_x_val(line, y + 1)
+                    if y == math.ceil(next_y_val) - 1 * m_sign:
+                        x_end = x + 1 * m_sign
+                    x_mid = (x_start + x_end)/2
+                    y_mid = calculate_y_val(line, x_mid)
+                    draw_points.add((math.floor(y_mid), x))
+                draw_points.add((math.floor(y_val), x))
     for child in tree_parser.children:
-        linear_approximation_img, drawn_object = linear_approximation_helper(linear_approximation_img, intersections, child, segment_length, drawn_object)
-    return linear_approximation_img, drawn_object
+        draw_points = linear_approximation_helper(intersections, child, branch_idx, segment_length, draw_points)
+    return draw_points
 
 '''                      ^
     IMAGE ANALYSIS       |
@@ -2808,12 +2499,17 @@ def derive_data(text, file):
     opaqued_img = opaque_img(img_path, img_name, opaque_output_path)
     resize_output_path = "math_obj_images/resized_images/resized_" + formatted_text + "_images/"
     resized_img = resize_img(opaque_output_path, "opaque_" + img_name, resize_output_path, 300)
-    prepped_img = prep_for_img_analysis(resized_img)
-    cv2.imwrite("initial_prep.jpg", prepped_img)
-    lin_app_img, objects = linear_approximation(prepped_img)
-    lin_app_img = cv2.cvtColor(lin_app_img, cv2.COLOR_BGR2GRAY)
-    pre_find_edges = remove_small_objects(lin_app_img, 60)
-    edges = find_edges(lin_app_img, False, img_objects = objects)
+    DIMENSIONS = resized_img.shape[:2]
+    main_img_idx = initialize_img(DIMENSIONS)
+    prep_for_img_analysis(resized_img, main_img_idx)
+
+    print(len(IMG_INFO[main_img_idx][3]))
+    cv_img = to_cv_img(main_img_idx)
+    cv2.imwrite("CIM_init_prep.jpg", cv_img)
+
+    lin_app_img_idx, objects = linear_approximation(main_img_idx)
+    remove_small_objects(lin_app_img_idx, 60)
+    edges = find_edges(lin_app_img_idx, False, img_objects = objects)
     edge_lengths = []
     for edge in edges:
         length = len(edge[1])
@@ -2886,26 +2582,25 @@ def derive_data(text, file):
             elif add_index == init_point_index:
                 add_index = 0
             segment.append(add_index)
-    init_y = init_point[0]
-    init_x = init_point[1]
+    init_y, init_x = init_point
     shifted_points = []
     for point, object in points:
         shifted_y = point[0] - init_y
         shifted_x = point[1] - init_x
         shifted_points.append((shifted_y, shifted_x))
-    max_value = max([max(abs(point[0]), abs(point[1])) for point in shifted_points])
+    max_value = max([max(abs(y), abs(x)) for y, x in shifted_points])
     scale_constant = max_value/3
     final_points = []
     for point in shifted_points:
         final_y = -1 * point[0]/scale_constant
         final_x = point[1]/scale_constant
         final_points.append((final_y, final_x))
-    return (final_points, segments)
+    return final_points, segments
 
 def get_parameters(text):
     object = create_object(text)
     obj_text, obj_type = object
-    name = capitalize_first_letters(text)
+    name = " ".join([word[0].upper() + word[1:] for word in text.split(" ")])
     with open("object_frames.txt", "a") as f:
         f.write("OBJ - " + name + "\n")
         if obj_type == 1:
@@ -2941,9 +2636,50 @@ def get_parameters(text):
 
 def main():
     args = sys.argv[1:]
-    term = args[0]
-    print("working...")
-    get_parameters(term)
+    term = "rectangle"#args[0]
+    print("check")
+    #get_parameters(term)
+    #print(term)
+
+
+    '''A_set = {(8, 5), (9, 6), (9, 7), (9, 8), (10, 8), (11, 7)}
+    B_set = {(8, 5), (9, 6), (9, 7), (9, 8), (10, 8), (11, 7)}
+    B_grid = [
+    [False for i in range(20)] for j in range(20)
+    ]
+    for y, x in B_set:
+        B_grid[y][x] = True
+    A = (A_set,)
+    B = (B_set, B_grid)
+    print(is_near_subset(A, B, 3))'''
+
+
+
+    '''B_width = 20
+    B_length = 20
+    closeness_bound = 3
+    for A_y, A_x in A_set:
+        for i in range(closeness_bound + 1):
+            min_x = A_x - i
+            max_x = A_x + i
+            min_y = A_y - i
+            max_y = A_y + i
+            for x in range(min_x, max_x + 1):
+                if 0 <= x < B_width:
+                    if 0 <= min_y < B_length:
+                        B_grid[min_y][x] = "*"
+                    if 0 <= max_y < B_length:
+                        B_grid[max_y][x] = "*"
+            else:
+                for y in range(min_y, max_y + 1):
+                    if 0 <= y < B_length:
+                        print(True)
+                        if 0 <= min_x < B_width:
+                            B_grid[y][min_x] = "*"
+                        if 0 <= max_x < B_width:
+                            B_grid[y][max_x] = "*"
+    for row in B_grid:
+        print(row)'''
 
 if __name__ == "__main__":
     main()
