@@ -7,7 +7,6 @@ from sentence_transformers import SentenceTransformer, util
 import cv2
 import math
 import json
-import openai
 
 sys.path.append(os.path.abspath("AninotesLibs/FlatCVLib/src/FlatCV_aninotes"))
 import FlatCV as fcv
@@ -233,12 +232,10 @@ def createObject(text):
         objType = 1
     else:
         objText = text
-        #fileName = getImgUrls(text, "mathematics")
-        #downloadImages(fileName)
+        fileName = getImgUrls(text, "mathematics")
+        downloadImages(fileName)
         objType = 2
     return objText, objType
-
-#--------------------------------------
 
 def buildWireframe(text):
     fText = formatText(text)
@@ -258,17 +255,15 @@ def buildWireframe(text):
     resizeOutputPath = "Images/ResizedImages/Resized" + fText + "Images/"
     resizedImg = fcv.resizeImage(opaqueOutputPath, "Opaque" + imgName, resizeOutputPath, 300)
     preppedImg = fcv.prepForImgAnalysis(resizedImg)
-    print("Linear Approximation Starting...")
     linAppImg, objs = fcv.linearApproximation(preppedImg)
     linAppImg = cv2.cvtColor(linAppImg, cv2.COLOR_BGR2GRAY)
     preFindEdges = fcv.removeSmallObjects(linAppImg, 60)
-    print("Find Edges No. 2 Starting...")
     edges = fcv.findEdges(linAppImg, False, imgObjs = objs)
-    edgeLngths = [*{len(edge[1].pts) for edge in edges}]
+    edgeLngths = [*{len(edge[1]) for edge in edges}]
     edgeLngths.sort(reverse = True)
     edgeLngthDct = [[lngth, []] for lngth in edgeLngths]
     for edge in edges:
-        lngth = len(edge[1].pts)
+        lngth = len(edge[1])
         for itm in edgeLngthDct:
             if itm[0] == lngth:
                 itm[1].append(edge)
@@ -278,11 +273,10 @@ def buildWireframe(text):
     segments = []
     for edge in srtdEdges:
         closeBnd = 5
-        psblBnd = math.floor(len(edge[1].pts)/8)
+        psblBnd = math.floor(len(edge[1])/8)
         if psblBnd > closeBnd:
             closeBnd = psblBnd
-        edgePts, segment, obj = edge
-        ptsInEdge = segment.pts
+        edgePts, ptsInEdge, obj = edge
         endpt1 = ptsInEdge[0]
         endpt2 = ptsInEdge[len(ptsInEdge) - 1]
         for pt, iterObj in pts:
@@ -341,7 +335,7 @@ def visualizeObject(text):
             data["text"] = objText
         elif objType == 2:
             data["type"] = "G_OBJ"
-            #fileName = getImgUrls(text, "mathematics")
+            fileName = getImgUrls(text, "mathematics")
             wf = buildWireframe(text)
             pts, segments = wf
             data["points"] = [[*reversed(pt)] for pt in pts]
@@ -350,37 +344,9 @@ def visualizeObject(text):
         f.write(jsonObj)
         f.close()
 
-def visualizeText(text):
-    openai.api_key = "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"
-
-    isMathText = True ###
-    if isMathText:
-        text = f"Translate the following statement to mathematical symbols when applicable: \'{text}\'"
-
-    completion = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "user", "content": text}
-        ]
-    )
-    response = completion.choices[0].message.content
-    print(response)
-
 def main():
-    #term = args[0]
-    #visualizeObject(term)
-    visualizeText(args[0])
-    '''
-    #143.853139
-    times = [5.883836999999999, 2.7778659999999995, 2.4328950000000003, 0.2235510000000005, 4.542438999999995, 7.995388, 0.22926999999999964, 0.8232449999999893, 8.466327999999999, 0, 0.02056999999999931, 0, 0.845593, 4.888556, 0, 0, 45.11122700000566, 0, 8.128274000000008, 2.7322890000000015, 1.8801559999999995, 4.6125219999999985, 4.813512999999997, 22.47171500000001, 122.550086, 0, 0, 0, 0, 64.407606, 0.21195699999999817, 0.22654200000000912, 4.9999999873762135e-06, 7.692322000000004, 65.064749, 0.008874000000034243, 65.125423, 0.17717999999997858]
-    for i, t in enumerate(times):
-        print(i, t)'''
-
-import time
+    term = args[0]
+    visualizeObject(term)
 
 if __name__ == "__main__":
-    #st = time.process_time()
     main()
-    #print(time.process_time() - st)
-    #print(fcv.TIMES)
-    #print(fcv.TIMES[16], fcv.CALLS[16], fcv.TIMES[16]/fcv.CALLS[16])
