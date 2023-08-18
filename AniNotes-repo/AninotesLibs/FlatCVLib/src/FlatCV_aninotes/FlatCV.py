@@ -11,14 +11,14 @@ from sentence_transformers import SentenceTransformer, util
 from anytree import Node, RenderTree
 from random import sample
 
-#                                                     .  .  .
-# Neighborhood of range 1 around a point (*) --->     .  *  .
-#                                                     .  .  .
-
-# Returns a list of all continuous groups of points in img with the same characteristic as denoted by color.
-#
-# For color: 0 = black ; 1 = white ; 2 = nonwhite ; 3 = pseudowhite ; 4 = transparent
 def getSetsOfColoredPoints(img, color, pilImg = -1):
+    """Return all contiguous groups of pixels in the base image that have a specified quality.
+
+    Keyword Arguments:
+    img -- The base image.
+    color -- The quality of interest: 0 means black, 1 means white, 2 means nonwhite, 3 means pseudowhite, 4 means transparent.
+    pilImg -- The base image in a form usable by PIL; used to locate transparent points.
+    """
     h, w = img.shape[0:2]
     objPtLsts = []
     for y in range(h):
@@ -43,9 +43,15 @@ def getSetsOfColoredPoints(img, color, pilImg = -1):
                     objPtLsts.append(ptSet)
     return objPtLsts
 
-# Returns a black and white image where pixels are colored in if they are distinctly different from backgroundColor
-# in img.
 def backgroundThreshold(img, bkgrdColor, pts, edgePt):
+    """Returns a blank image where the specified points from the base image are shown in black if they contrast heavily from the given background color.
+
+    Keyword Arguments:
+    img -- The base image.
+    bkgrdColor -- 
+    pts -- The points to potentially be made black.
+    edgePt -- 
+    """
     h, w = img.shape[0:2]
     thresh = np.zeros((h, w, 3), np.uint8)
     thresh = ~thresh
@@ -63,10 +69,14 @@ def backgroundThreshold(img, bkgrdColor, pts, edgePt):
                 thresh[y, x] = 0
     return thresh
 
-# PRECONDITION: img is thresholded and contains one object.
-#
-# Returns whether or not the img is "hollow" (i.e. the object within it has an inside.)
 def isHollow(img):
+    """Returns whether or not the image is "hollow" (i.e. the object displayed in it has an inside).
+
+    Precondition: img is black and white, and only displays a single object
+
+    Keyword Arguments:
+    img -- The image to be analyzed.
+    """
     h, w = img.shape[0:2]
     edges = np.zeros((h, w, 3), np.uint8)
     edges = ~edges
@@ -102,10 +112,17 @@ def isHollow(img):
     # and the points that were drawn to edges (drawnPts).
     return len(ptSets) != 1, drawnPts
 
-# PRECONDITION: img is black and white.
-#
-# Returns a list of points of the edge of the object given by objPts on img.
 def getEdgePoints(img, objPts, removedPts, bndryLyrs):
+    """Returns a list of points on the edge of the object given by objPts.
+
+    Precondition: img is black and white.
+
+    Keyword Arguments:
+    img -- The image which objPts refers to.
+    objPts -- The points that compose the titular object.
+    removedPts -- 
+    bndryLyrs -- 
+    """
     h, w = img.shape[0:2]
 
     # The points on the very edge of objPts.
@@ -144,10 +161,15 @@ def getEdgePoints(img, objPts, removedPts, bndryLyrs):
             img[y, x] = 255
         return getEdgePoints(img, newObjPts, removedPts, bndryLyrs - 1)
 
-# PRECONDITION: img is black and white.
-#
-# Fills in all small holes (black or white) with sizes less than maxSize or a smart size if maxSize is equal to -1.
 def removeSmallObjects(img, maxSize):
+    """Returns an image with small black and white holes filled in.
+
+    Precondition: img is black and white.
+
+    Keyword Arguments:
+    img -- The image with the holes to fill in.
+    maxSize -- The maximum size of holes to fill in. If maxSize is -1, then the function is in smart mode.
+    """
     h, w = img.shape[:2]
 
     # List of white point groups in img.
@@ -202,10 +224,17 @@ def removeSmallObjects(img, maxSize):
                 img[y][x] = 255
     return img
 
-# PRECONDITION: img has no transparent points.
-#
-# Returns a black and white image containing the objects in img.
 def getThresholdedImg(img, crntPts, edgePts, thresh):
+    """Returns a black and white image where the objects displayed in img are black.
+
+    Precondition: img has no transparent points.
+
+    Keyword Arguments:
+    img -- The image that the resultant image will be created from.
+    crntPts -- 
+    edgePts -- 
+    thresh -- 
+    """
 
     # Don't continue if the current points are small in number (extraneous).
     if len(crntPts) <= 5:
@@ -273,10 +302,15 @@ def getThresholdedImg(img, crntPts, edgePts, thresh):
             thresh = getThresholdedImg(img, obj, crntEdgePts, thresh)
         return thresh
 
-# PRECONDITION: img is black and white.
-#
-# Thins img to specific requirements.
 def thinImg(img):
+    """Returns a thinned copy of the base image.
+
+    Precondition: img is black and white.
+
+    Keyword Arguments:
+    img -- The base image.
+    """
+    
     h, w = img.shape[:2]
 
     # The coordinates of a point's range 1 neighbors relative to it.
@@ -333,10 +367,15 @@ def thinImg(img):
                             img[y][x] = 255
     return img
 
-# PRECONDITION: img is black and white.
-#
-# Thickens img by an amount designatied by thickFactor.
-def thickenImg(img, thickFactor):
+def thickenImg(img, thickFctr):
+    """Returns a copy of the base image.
+
+    Precondition: img is black and white.
+
+    Keyword Arguments:
+    img -- The base image.
+    thickFctr -- The thickening factor.
+    """
     h, w = img.shape[:2]
 
     # The result image.
@@ -353,7 +392,7 @@ def thickenImg(img, thickFactor):
 
                 # For each value i in the range of [1, rangeFactor], in the result image, mark each point adjacent
                 # to the current point i pixels away.
-                for i in range(1, thickFactor + 1):
+                for i in range(1, thickFctr + 1):
                     if y - i >= 0 and y - i < h and x >= 0 and x < w:
                         thick[y - i][x] = 0
                     if y >= 0 and y < h and x - i >= 0 and x - i < w:
@@ -366,6 +405,11 @@ def thickenImg(img, thickFactor):
 
 # One-stop-shop for image preparation according to everything required for the analysis to work.
 def prepForImgAnalysis(img):
+    """Returns a copy of the base image that satisfies all of the requirements to undergo analysis.
+
+    Keyword Arguments:
+    img -- The base image.
+    """
     h, w = img.shape[:2]
     thresh = np.zeros((h, w, 3),np.uint8)
     thresh = ~thresh
@@ -389,6 +433,11 @@ def prepForImgAnalysis(img):
     return final
 
 def numberOfObjects(img):
+    """Returns the number of separate objects displayed in the image.
+
+    Keyword Arguments:
+    img -- The image to be analyzed.
+    """
     h, w = img.shape[:2]
     objs = []
     objPtLsts = []
@@ -409,6 +458,14 @@ def numberOfObjects(img):
     return len(objPtLsts)
 
 def resizeImage(imgPath, imgName, outputPath, maxDim):
+    """Returns a resized copy of the base image, and writes the result to a specified location.
+
+    Keyword Arguments:
+    imgPath -- The location of the base image.
+    imgName -- The name of the base image.
+    outputPath -- The location that the resultant image will be written to.
+    maxDim -- The size of the maximum dimension in the resultant image.
+    """
     img = Image.open(imgPath + imgName)
     w, h = img.size
     bigDim = max(h, w)
@@ -419,8 +476,14 @@ def resizeImage(imgPath, imgName, outputPath, maxDim):
     return cvImg
 
 def getTransparentBoundaryPoints(cvImg, pilImg):
+    """Returns the transparent points that form a boundary on the outside of the base image.
+
+    Keyword Arguments:
+    cvImg -- The base image in a form usable by the cv module.
+    pilImg -- The base image in a form usable by the PIL module.
+    """
     h, w = cvImg.shape[:2]
-    bndryPots = set()
+    bndryPts = set()
     ptNbrs = {}
     for y in range(h):
         for x in range(w):
@@ -460,6 +523,12 @@ def getTransparentBoundaryPoints(cvImg, pilImg):
     return bndryPts, ptNbrs
 
 def removeTransparentBorder(cvImg, pilImg):
+    """Returns a copy of the base image where the border of transparent points on the outside of the image has been filled in.
+
+    Keyword Arguments:
+    cvImg -- The base image in a form usable by the cv module.
+    pilImg -- The base image in a form usable by the PIL module.
+    """
     h, w = cvImg.shape[0:2]
     trspntPtSets = getSetsOfColoredPoints(cvImg, 4, pilImg = pilImg)
     trspntPts = []
@@ -494,6 +563,12 @@ def removeTransparentBorder(cvImg, pilImg):
     return cvImg
 
 def opaqueImage(imgPath, imgName, outputPath):
+    """Returns and writes to a given location a copy of the base image where transparent sections and adjacent non-background white sections are filled in.
+
+    Keyword Arguments:
+    imgPath -- The location of the base image.
+    imgPath -- The name of the base image.
+    """
     cvImg = cv2.imread(imgPath + imgName)
     pilImg = Image.open(imgPath + imgName)
     pilImg = pilImg.convert("RGBA")
@@ -532,12 +607,22 @@ def opaqueImage(imgPath, imgName, outputPath):
     return cvImg
 
 def calculateSlope(line, approx):
+    """Returns the slope of the line.
+
+    Keyword Arguments:
+    line -- The line of interest.
+    approx -- If True, then 10000 is returned if the line has an undefined slope.
+    """
     return ["UND", 10000][approx] if line[2] - line[0] == 0 else (line[3] - line[1])/(line[2] - line[0])
 
-def floorPoint(pt):
-    return (math.floor(pt[0]), math.floor(pt[1]))
+def isNearSubset(A, B, closeBnd):
+    """Returns whether A is a near subset of B. i.e. if all points in A are within a specified distance to some point in B.
 
-def isNearSubset(A, B, closeBnd): # A is near subset of B
+    Keyword Arguments:
+    A -- The set to be checked.
+    B -- The set to be checked against.
+    closeBnd -- The allowed distance between points in A and points in B.
+    """
     if len(A) > len(B):
         return False
     else:
@@ -556,10 +641,23 @@ def isNearSubset(A, B, closeBnd): # A is near subset of B
         return isNearSubset
 
 def calculateYValOnCircle(circle, x, sign):
+    """Returns the y-value of the given circle at the specified x-value.
+
+    Keyword Arguments:
+    circle -- The circle of interest.
+    x -- The x-value.
+    sign -- The sign of the answer, since most x-values could give two y-values.
+    """
     a, b, r = circle
     return "none" if (r ** 2) - ((x - a) ** 2) < 0 else sign * math.sqrt((r ** 2) - ((x - a) ** 2)) + b
 
 def removeNearSubsetElements(lst, closeBnd):
+    """Returns a copy of the base list with all elements removed that are near subsets of the union of all other elements of the list.
+
+    Keyword Arguments:
+    lst -- The base list.
+    closeBnd -- The allowed distance between any element in lst and the union of all other elements in lst.
+    """
     newLst = []
     for itm in lst:
         if itm not in newLst:
@@ -576,11 +674,17 @@ def removeNearSubsetElements(lst, closeBnd):
                         otherElems.append(pt)
         if not isNearSubset(elem[1], otherElems, closeBnd):
             finalLst.append(elem)
-        else: # MAYBE REMOVE? IDK... IF ISSUES --> CONSIDER
+        else:
             lstCopy.remove(elem)
     return finalLst
 
 def hcAccumArray(img, rVals):
+    """Returns the accumulation array for houghCircles.
+
+    Keyword Arguments:
+    img -- The image to be analyzed.
+    rVals -- The radius values to be considered.
+    """
     h, w = img.shape[:2]
     accumArr = np.zeros((len(rVals), h, w))
     for i in range(h):
@@ -602,6 +706,14 @@ def hcAccumArray(img, rVals):
     return accumArr
 
 def findCircles(img, accumArr, rVals, houghThresh):
+    """Returns the located circles for houghCircles.
+
+    Keyword Arguments:
+    img -- The image to be analyzed.
+    accumArr -- The accumulation array.
+    rVals -- The radius values to be considered.
+    houghThresh -- The accumulation threshold.
+    """
     resLst = []
     hLst = []
     wLst = []
@@ -625,6 +737,11 @@ def findCircles(img, accumArr, rVals, houghThresh):
     return resLst
 
 def houghCircles(img):
+    """Returns all circles in the image.
+
+    Keyword Arguments:
+    img -- The image to be analyzed.
+    """
     rVals = []
     for r in range(30):
         rVals.append(r)
@@ -1104,7 +1221,7 @@ def findIntersections(img):
         mdl1, mdl2 = intrsctngPair
         intrsctns = calculateIntersection(mdl1, mdl2)
         for intrsctn in intrsctns:
-            rndIntrsctn = floorPoint(intrsctn)
+            rndIntrsctn = (math.floor(intrsctn[0]), math.floor(intrsctn[1]))
             rndY, rndX = rndIntrsctn
             potIntrsctns = {}
             rngLngth = 5
